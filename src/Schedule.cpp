@@ -14,6 +14,7 @@ struct ScheduleContents {
     LoopLevel store_level, compute_level;
     std::vector<Split> splits;
     std::vector<Dim> dims;
+    std::vector<StorageSplit> storage_splits;
     std::vector<std::string> storage_dims;
     std::vector<Bound> bounds;
     std::vector<Specialization> specializations;
@@ -57,9 +58,17 @@ bool Schedule::touched() const {
 const std::vector<Split> &Schedule::splits() const {
     return contents.ptr->splits;
 }
+    
+const std::vector<StorageSplit> &Schedule::storage_splits() const {
+    return contents.ptr->storage_splits;
+}
 
 std::vector<Split> &Schedule::splits() {
     return contents.ptr->splits;
+}
+
+std::vector<StorageSplit> &Schedule::storage_splits() {
+    return contents.ptr->storage_splits;
 }
 
 std::vector<Dim> &Schedule::dims() {

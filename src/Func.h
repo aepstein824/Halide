@@ -1362,6 +1362,17 @@ public:
     EXPORT Func &reorder_storage(Var x, Var y, Var z, Var w, Var t);
     // @}
 
+    /** Specify how the storage for the function is laid out. This
+     * call let you split one variable into two. On its own, this
+     * call has no effect, but it can be used in conjunction with
+     * reorder_storage() to make block based storage.
+     */
+    // @{
+    EXPORT Func &split_storage(Var old, Var outer, Var inner,
+			       Expr factor);
+    // @}
+
+
     /** Compute this function as needed for each unique value of the
      * given var for the given calling function f.
      *

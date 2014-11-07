@@ -90,6 +90,12 @@ struct Dim {
     bool pure;
 };
 
+struct StorageSplit {
+    std::string old_var, outer, inner;
+    Expr factor;
+};
+
+
 struct Bound {
     std::string var;
     Expr min, extent;
@@ -164,6 +170,15 @@ public:
     const std::vector<std::string> &storage_dims() const;
     std::vector<std::string> &storage_dims();
     // @}
+
+    /** The storage of the domain of a function can have some of its
+     * dimensions split into sub-dimensions.
+     * See ScheduleHandle::split_storage */
+    // @{
+    const std::vector<StorageSplit> &storage_splits() const;
+    std::vector<StorageSplit> &storage_splits();
+    // @}
+
 
     /** You may explicitly bound some of the dimensions of a
      * function. See \ref Func::bound */

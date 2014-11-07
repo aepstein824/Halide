@@ -1199,6 +1199,41 @@ Func &Func::glsl(Var x, Var y, Var c) {
     return *this;
 }
 
+Func &Func::split_storage(Var old, Var outer, Var inner, Expr factor) {
+    
+    // Replace the old dimension with the new dimensions in the dims list
+    bool found = false;
+    string inner_name, outer_name, old_name;
+    vector<std::string> &dims = func.schedule().storage_dims();
+    for (size_t i = 0; (!found) && i < dims.size(); i++) {
+        if (var_name_match(dims[i], old.name())) {
+            found = true;
+	    old_name = dims[i];
+            inner_name = old_name + "." + inner.name();
+            outer_name = old_name + "." + outer.name();
+            dims.insert(dims.begin() + i, dims[i]);
+            dims[i] = inner_name;
+            dims[i+1] = outer_name;
+        }
+    }
+
+    if (!found) {
+        user_error << "Could not find storage_split dimension in argument list: "
+                   << old
+                   << "\n"
+                   << old.name() << ", "
+		   << outer.name() << ", "
+		   << inner.name()
+		   << "\n";
+    }
+
+    // Add the split to the splits list
+    StorageSplit split = {old_name, outer_name, inner_name, factor};
+    std::vector<StorageSplit> &splitList = func.schedule().storage_splits();
+    splitList.push_back(split);
+    return *this;
+}
+
 Func &Func::reorder_storage(Var x, Var y) {
     invalidate_cache();
 
