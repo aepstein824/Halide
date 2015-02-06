@@ -1231,6 +1231,10 @@ Func &Func::split_storage(Var old, Var outer, Var inner, Expr factor) {
     StorageSplit split = {old_name, outer_name, inner_name, factor};
     std::vector<StorageSplit> &splitList = func.schedule().storage_splits();
     splitList.push_back(split);
+    /*for (int i = 0; i < dims.size(); i++) {
+	printf("%lu: splitList %s\n", dims.size(), dims[i].c_str());
+	}*/
+
     return *this;
 }
 

@@ -1,3 +1,4 @@
+#include <iostream> //AE: testing
 #include <sstream>
 
 #include "StorageFlattening.h"
@@ -5,6 +6,8 @@
 #include "IROperator.h"
 #include "Scope.h"
 #include "Bounds.h"
+#include "Simplify.h"
+
 
 namespace Halide {
 namespace Internal {
@@ -13,7 +16,7 @@ using std::ostringstream;
 using std::string;
 using std::vector;
 using std::map;
-
+    using std::cout; //AE
 namespace {
 // Visitor and helper function to test if a piece of IR uses an extern image.
 class UsesExternImage : public IRVisitor {
@@ -37,6 +40,41 @@ inline bool uses_extern_image(Stmt s) {
     return uses.result;
 }
 }
+
+    std::vector<StorageSplit> rebalanceTree (std::vector<StorageSplit> splits) {
+        // very similar to code in Lower.cpp in build_provide_loop_nest
+        for (size_t i = 0; i < splits.size(); i++) {
+            for (size_t j = i + 1; j < splits.size(); j++) {
+                StorageSplit &first = splits[i];
+                StorageSplit &second = splits[j];
+                if (first.outer == second.old_var) {
+                    // Given two splits:
+                    // X  ->  a * Xo  + Xi
+                    // (splits stuff other than Xo, including Xi)
+                    // Xo ->  b * Xoo + Xoi
+                    // Re-write to:
+                    // X  -> ab * Xoo + s0
+                    // s0 ->  a * Xoi + Xi
+                    // (splits on stuff other than Xo, including Xi)
+                    // The name Xo went away, because it was legal for it to
+                    // be X before, but not after.
+                    second.old_var = unique_name('s');
+                    first.outer   = second.outer;
+                    second.outer  = second.inner;
+                    second.inner  = first.inner;
+                    first.inner   = second.old_var;
+                    Expr f = simplify(first.factor * second.factor);
+                    second.factor = first.factor;
+                    first.factor  = f;
+                    // Push the second split back to just after the first
+                    for (size_t k = j; k > i+1; k--) {
+                        std::swap(splits[k], splits[k-1]);
+                    }
+                }
+            }
+        }
+        return splits;
+    }
 
 class FlattenDimensions : public IRMutator {
 public:
@@ -97,38 +135,104 @@ private:
 
     void visit(const Realize *realize) {
         realizations.push(realize->name, 1);
+        //AE: realize.bounds just contains variables made to contain bounds info of the arguments
 
         Stmt body = mutate(realize->body);
+        //Stmt body = realize->body;
+        
+        Region splitBounds;
+
+        map<string, Function>::const_iterator iter = env.find(realize->name);
+        internal_assert(iter != env.end()) << "Realize node refers to function not in environment.\n";
+        vector<StorageSplit> splits = iter->second.schedule().storage_splits();
+        //cout << "size = " << splits.size() << "\n";
+        splits = rebalanceTree(splits);
+
+        const vector<string> &storage_dims = iter->second.schedule().storage_dims();
+        const vector<string> &args = iter->second.args();
+        for (size_t i = 0; i < storage_dims.size(); i++) {
+            //cout << "storage_dims[" << i << "] == " << storage_dims[i] << "\n";
+            /*
+             * Three cases for a variable in the storage_dims.
+             * 1) It is unsplit. It will appear in the args, and its bound comes
+             *  from the old bounds extent.
+             * 2) Outer. Then it is bound(parent) / factor. Parent can be arg or
+             *  a split. Due to rebalance, in a tree, all but 1 will be this
+             * 3) Inner. Extent is just factor.
+             * TODO: figure out mins, deal with new names from rebalanced splits, non exact divisions
+             */
+            int varCase = -1;
+            string search;
+            Expr const *num = 0;
+            Expr const *den = 0;
+            //first figure out if it's a case 2, because 2 needs info from inners
+            // and possibly the args array
+            
+            for (size_t j = 0; j < splits.size(); j++) {
+                //cout << "checking split outer: " << splits[j].outer << "\n";
+                if (storage_dims[i] == splits[j].outer) {
+                    varCase = 2;
+                    search = splits[j].old_var;
+                    den = &splits[j].factor;
+                    break;
+                }
+            }
+            // at this point it must be either 1 or 3, so we are still searching
+            //  for the variable name itself
+            if (search.empty()) {
+                search = storage_dims[i];
+            }
+            //if it was 2, look for its old val in the inners
+            //otherwise, look for it as a case 3
+            for (size_t j = 0; j < splits.size(); j++) {
+                if (search == splits[j].inner) {
+                    num = &splits[j].factor;
+                    if (varCase < 0) {
+                        // an inner that isn't also an outer is a case 3
+                        varCase = 3;
+                    }
+                    break;
+                }
+            }
+            //if it was 2 and we haven't found it, or we just haven't found it
+            bool searchArgs = (varCase == 2 && num == 0) || (varCase < 0);
+            for (size_t j = 0; searchArgs && j < args.size(); j++) {
+                if (search == args[j]) {
+                    num = &realize->bounds[j].extent;
+                    if (varCase < 0) {
+                        //if the first mention of the variable is in the
+                        // args list, then it was never split
+                        //currently unused, but good to know
+                        varCase = 1;
+                    }
+                    break;
+                }
+            }
+            internal_assert(num != 0);
+            Expr splitMin = Expr(0);
+            Expr splitExtent = *num;
+            if (den != 0) {
+                splitExtent = simplify((*num) / (*den));
+            }
+
+            splitBounds.push_back(Range(splitMin, splitExtent));
+        }
 
         // Compute the size
+        //AE: I think I'll have to take splits into account here, because it modifies the bounds
         std::vector<Expr> extents;
-        for (size_t i = 0; i < realize->bounds.size(); i++) {
-          extents.push_back(realize->bounds[i].extent);
+        for (size_t i = 0; i < splitBounds.size(); i++) {
+          extents.push_back(splitBounds[i].extent);
           extents[i] = mutate(extents[i]);
         }
         Expr condition = mutate(realize->condition);
 
         realizations.pop(realize->name);
 
-        vector<int> storage_permutation;
-        {
-            map<string, Function>::const_iterator iter = env.find(realize->name);
-            internal_assert(iter != env.end()) << "Realize node refers to function not in environment.\n";
-            const vector<string> &storage_dims = iter->second.schedule().storage_dims();
-            const vector<string> &args = iter->second.args();
-            for (size_t i = 0; i < storage_dims.size(); i++) {
-                for (size_t j = 0; j < args.size(); j++) {
-                    if (args[j] == storage_dims[i]) {
-                        storage_permutation.push_back((int)j);
-                    }
-                }
-                internal_assert(storage_permutation.size() == i+1);
-            }
-        }
-
-        internal_assert(storage_permutation.size() == realize->bounds.size());
+        internal_assert(storage_dims.size() == splitBounds.size());
 
         stmt = body;
+        //AE: a separate buffer for each type?
         for (size_t idx = 0; idx < realize->types.size(); idx++) {
             string buffer_name = realize->name;
             if (realize->types.size() > 1) {
@@ -136,7 +240,7 @@ private:
             }
 
             // Make the names for the mins, extents, and strides
-            int dims = realize->bounds.size();
+            int dims = splitBounds.size();
             vector<string> min_name(dims), extent_name(dims), stride_name(dims);
             for (int i = 0; i < dims; i++) {
                 string d = int_to_string(i);
@@ -171,21 +275,21 @@ private:
             stmt = LetStmt::make(buffer_name + ".buffer",
                                  buf,
                                  stmt);
-
             // Make the allocation node
             stmt = Allocate::make(buffer_name, t, extents, condition, stmt);
-
+            // AE: since the code uses storage_dims directly now, it shouldn't
+            //  need any reordering stuff now?
             // Compute the strides
-            for (int i = (int)realize->bounds.size()-1; i > 0; i--) {
-                int prev_j = storage_permutation[i-1];
-                int j = storage_permutation[i];
-                Expr stride = stride_var[prev_j] * extent_var[prev_j];
-                stmt = LetStmt::make(stride_name[j], stride, stmt);
+            for (int i = (int)splitBounds.size()-1; i > 0; i--) {
+                //int prev_j = storage_dims[i-1];
+                //int j = storage_dims[i];
+                Expr stride = stride_var[i-1] * extent_var[i-1];
+                stmt = LetStmt::make(stride_name[i], stride, stmt);
             }
             // Innermost stride is one
             if (dims > 0) {
-                int innermost = storage_permutation.empty() ? 0 : storage_permutation[0];
-                stmt = LetStmt::make(stride_name[innermost], 1, stmt);
+                //int innermost = storage_permutation.empty() ? 0 : storage_permutation[0];
+                stmt = LetStmt::make(stride_name[0], 1, stmt);
             }
 
             // Assign the mins and extents stored
