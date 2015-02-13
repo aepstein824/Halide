@@ -86,46 +86,112 @@ private:
     const map<string, Function> &env;
     Scope<int> realizations;
 
-    Expr flatten_args(const string &name, const vector<Expr> &args,
+    Expr flatten_args(const string &name, const vector<Expr> &callArgs,
                       bool internal) {
         Expr idx = 0;
-        vector<Expr> mins(args.size()), strides(args.size());
+        vector<Expr> mins, strides;
 
-        for (size_t i = 0; i < args.size(); i++) {
-            string dim = int_to_string(i);
-            string stride_name = name + ".stride." + dim;
-            string min_name = name + ".min." + dim;
-            string stride_name_constrained = stride_name + ".constrained";
-            string min_name_constrained = min_name + ".constrained";
-            if (scope.contains(stride_name_constrained)) {
-                stride_name = stride_name_constrained;
+        //AE: experimental
+        map<string, Function>::const_iterator iter = env.find(name);
+        if(iter != env.end()){
+            vector<StorageSplit> splits = iter->second.schedule().storage_splits();
+            splits = rebalanceTree(splits);
+            
+            const vector<string> &storage_dims = iter->second.schedule().storage_dims();
+            
+            for (size_t i = 0; i < storage_dims.size(); i++) {
+                string dim = int_to_string(i);
+                string stride_name = name + ".stride." + dim;
+                string min_name = name + ".min." + dim;
+                string stride_name_constrained = stride_name + ".constrained";
+                string min_name_constrained = min_name + ".constrained";
+                if (scope.contains(stride_name_constrained)) {
+                    stride_name = stride_name_constrained;
+                }
+                if (scope.contains(min_name_constrained)) {
+                    min_name = min_name_constrained;
+                }
+                strides.push_back(Variable::make(Int(32), stride_name));
+                mins.push_back(Variable::make(Int(32), min_name));
             }
-            if (scope.contains(min_name_constrained)) {
-                min_name = min_name_constrained;
-            }
-            strides[i] = Variable::make(Int(32), stride_name);
-            mins[i] = Variable::make(Int(32), min_name);
-        }
+            
+            const vector<string> &funcArgs = iter->second.args();
+            for (size_t i = 0; i < funcArgs.size(); i++) {
+                string search = funcArgs[i];
+                bool insideSplit = false;
+                Expr lastSplit;
+                bool shouldSearchSplits = true;
+                while (shouldSearchSplits) {
+                    shouldSearchSplits = false;
+                    for (size_t j = 0; j < splits.size(); j++) {
+                        if (splits[j].old_var == search) {
+                            Expr splitVal = callArgs[i];
+                            if (insideSplit) {
+                                splitVal = splitVal % lastSplit;
+                            }
+                            splitVal /= splits[j].factor;
+                            for (size_t k = 0; k < storage_dims.size(); k++) {
+                                //AE:
+                                if (splits[j].outer == storage_dims[k]) {
+                                    idx += (splitVal * strides[k]);
+                                }
+                            }
+                            search = splits[j].inner;
+                            shouldSearchSplits = true;
+                            lastSplit = splits[j].factor;
+                            insideSplit = true;
+                        }
+                    }
+                }
+                for (size_t k = 0; k < storage_dims.size(); k++) {
+                    if (search == storage_dims[k]) {
+                        //AE
+                        Expr splitVal = callArgs[i];
+                        if (insideSplit) {
+                            splitVal = splitVal % lastSplit;
+                        }
+                        idx += splitVal * strides[k];
+                    }
+                }
 
-        if (internal) {
-            // f(x, y) -> f[(x-xmin)*xstride + (y-ymin)*ystride] This
-            // strategy makes sense when we expect x to cancel with
-            // something in xmin.  We use this for internal allocations
-            for (size_t i = 0; i < args.size(); i++) {
-                idx += (args[i] - mins[i]) * strides[i];
             }
         } else {
-            // f(x, y) -> f[x*stride + y*ystride - (xstride*xmin +
-            // ystride*ymin)]. The idea here is that the last term
-            // will be pulled outside the inner loop. We use this for
-            // external buffers, where the mins and strides are likely
-            // to be symbolic
-            Expr base = 0;
-            for (size_t i = 0; i < args.size(); i++) {
-                idx += args[i] * strides[i];
-                base += mins[i] * strides[i];
+            for (size_t i = 0; i < callArgs.size(); i++) {
+                string dim = int_to_string(i);
+                string stride_name = name + ".stride." + dim;
+                string min_name = name + ".min." + dim;
+                string stride_name_constrained = stride_name + ".constrained";
+                string min_name_constrained = min_name + ".constrained";
+                if (scope.contains(stride_name_constrained)) {
+                    stride_name = stride_name_constrained;
+                }
+                if (scope.contains(min_name_constrained)) {
+                    min_name = min_name_constrained;
+                }
+                strides.push_back(Variable::make(Int(32), stride_name));
+                mins.push_back(Variable::make(Int(32), min_name));
             }
-            idx -= base;
+
+            if (internal) {
+                // f(x, y) -> f[(x-xmin)*xstride + (y-ymin)*ystride] This
+                // strategy makes sense when we expect x to cancel with
+                // something in xmin.  We use this for internal allocations
+                for (size_t i = 0; i < callArgs.size(); i++) {
+                    idx += (callArgs[i] - mins[i]) * strides[i];
+                }
+            } else {
+                // f(x, y) -> f[x*stride + y*ystride - (xstride*xmin +
+                // ystride*ymin)]. The idea here is that the last term
+                // will be pulled outside the inner loop. We use this for
+                // external buffers, where the mins and strides are likely
+                // to be symbolic
+                Expr base = 0;
+                for (size_t i = 0; i < callArgs.size(); i++) {
+                    idx += callArgs[i] * strides[i];
+                    base += mins[i] * strides[i];
+                }
+                idx -= base;
+            }
         }
 
         return idx;
@@ -145,13 +211,11 @@ private:
         map<string, Function>::const_iterator iter = env.find(realize->name);
         internal_assert(iter != env.end()) << "Realize node refers to function not in environment.\n";
         vector<StorageSplit> splits = iter->second.schedule().storage_splits();
-        //cout << "size = " << splits.size() << "\n";
         splits = rebalanceTree(splits);
 
         const vector<string> &storage_dims = iter->second.schedule().storage_dims();
         const vector<string> &args = iter->second.args();
         for (size_t i = 0; i < storage_dims.size(); i++) {
-            //cout << "storage_dims[" << i << "] == " << storage_dims[i] << "\n";
             /*
              * Three cases for a variable in the storage_dims.
              * 1) It is unsplit. It will appear in the args, and its bound comes
@@ -169,7 +233,6 @@ private:
             // and possibly the args array
             
             for (size_t j = 0; j < splits.size(); j++) {
-                //cout << "checking split outer: " << splits[j].outer << "\n";
                 if (storage_dims[i] == splits[j].outer) {
                     varCase = 2;
                     search = splits[j].old_var;
@@ -217,7 +280,7 @@ private:
 
             splitBounds.push_back(Range(splitMin, splitExtent));
         }
-
+        
         // Compute the size
         //AE: I think I'll have to take splits into account here, because it modifies the bounds
         std::vector<Expr> extents;
@@ -286,6 +349,7 @@ private:
                 Expr stride = stride_var[i-1] * extent_var[i-1];
                 stmt = LetStmt::make(stride_name[i], stride, stmt);
             }
+
             // Innermost stride is one
             if (dims > 0) {
                 //int innermost = storage_permutation.empty() ? 0 : storage_permutation[0];
@@ -293,9 +357,9 @@ private:
             }
 
             // Assign the mins and extents stored
-            for (size_t i = realize->bounds.size(); i > 0; i--) {
-                stmt = LetStmt::make(min_name[i-1], realize->bounds[i-1].min, stmt);
-                stmt = LetStmt::make(extent_name[i-1], realize->bounds[i-1].extent, stmt);
+            for (size_t i = dims; i > 0; i--) {
+                stmt = LetStmt::make(min_name[i-1], splitBounds[i-1].min, stmt);
+                stmt = LetStmt::make(extent_name[i-1], splitBounds[i-1].extent, stmt);
             }
         }
     }
