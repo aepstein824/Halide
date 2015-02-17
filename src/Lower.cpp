@@ -21,12 +21,14 @@
 #include "SlidingWindow.h"
 #include "StorageFolding.h"
 #include "RemoveTrivialForLoops.h"
+#include "RemoveDeadAllocations.h"
 #include "Deinterleave.h"
 #include "DebugToFile.h"
 #include "EarlyFree.h"
 #include "UniquifyVariableNames.h"
 #include "SkipStages.h"
 #include "CSE.h"
+#include "SpecializeBranchedLoops.h"
 #include "SpecializeClampedRamps.h"
 #include "RemoveUndef.h"
 #include "AllocationBoundsInference.h"
@@ -40,6 +42,7 @@
 #include "FuseGPUThreadLoops.h"
 #include "InjectHostDevBufferCopies.h"
 #include "Memoization.h"
+#include "VaryingAttributes.h"
 
 namespace Halide {
 namespace Internal {
@@ -215,20 +218,10 @@ Stmt build_provide_loop_nest(Function f,
 
             string base_name = prefix + split.inner + ".base";
             Expr base_var = Variable::make(Int(32), base_name);
-            //stmt = LetStmt::make(prefix + split.old_var, base_var + inner, stmt);
+            // Substitute in the new expression for the split variable ...
             stmt = substitute(prefix + split.old_var, base_var + inner, stmt);
-
-            if (split.exact) {
-                // The bounds of the old reduction variable need to be
-                // explicitly defined for the benefit of producers
-                // that feed into this stage. They run from base to
-                // base + split factor.
-                stmt = LetStmt::make(prefix + split.old_var + ".min",
-                                     base_var, stmt);
-                stmt = LetStmt::make(prefix + split.old_var + ".max",
-                                     base_var + split.factor - 1, stmt);
-            }
-
+            // ... but also define it as a let for the benefit of bounds inference.
+            stmt = LetStmt::make(prefix + split.old_var, base_var + inner, stmt);
             stmt = LetStmt::make(base_name, base, stmt);
 
         } else if (split.is_fuse()) {
@@ -241,10 +234,10 @@ Stmt build_provide_loop_nest(Function f,
             Expr inner = fused % inner_extent + inner_min;
             Expr outer = fused / inner_extent + outer_min;
 
-            //stmt = LetStmt::make(prefix + split.inner, inner, stmt);
-            //stmt = LetStmt::make(prefix + split.outer, outer, stmt);
             stmt = substitute(prefix + split.inner, inner, stmt);
             stmt = substitute(prefix + split.outer, outer, stmt);
+            stmt = LetStmt::make(prefix + split.inner, inner, stmt);
+            stmt = LetStmt::make(prefix + split.outer, outer, stmt);
 
             // Maintain the known size of the fused dim if
             // possible. This is important for possible later splits.
@@ -256,8 +249,8 @@ Stmt build_provide_loop_nest(Function f,
             }
 
         } else {
-            // stmt = LetStmt::make(prefix + split.old_var, outer, stmt);
             stmt = substitute(prefix + split.old_var, outer, stmt);
+            stmt = LetStmt::make(prefix + split.old_var, outer, stmt);
         }
     }
 
@@ -426,7 +419,7 @@ Stmt build_produce(Function f) {
                 }
             } else if (args[j].is_buffer()) {
                 Buffer b = args[j].buffer;
-                Parameter p(b.type(), true, b.name());
+                Parameter p(b.type(), true, b.dimensions(), b.name());
                 p.set_buffer(b);
                 Expr buf = Variable::make(Handle(), b.name() + ".buffer", p);
                 extern_call_args.push_back(buf);
@@ -501,9 +494,9 @@ Stmt build_produce(Function f) {
         string result_name = unique_name('t');
         Expr result = Variable::make(Int(32), result_name);
         // Check if it succeeded
-        Stmt check = AssertStmt::make(EQ::make(result, 0), "Call to external func " +
-                                      extern_name + " returned non-zero value: %d",
-                                      vec<Expr>(result));
+        Stmt check = AssertStmt::make(EQ::make(result, 0),
+                                      vec<Expr>("Call to external func " + extern_name +
+                                                " returned non-zero value: ", result));
         check = LetStmt::make(result_name, e, check);
 
         for (size_t i = 0; i < lets.size(); i++) {
@@ -605,15 +598,17 @@ Stmt inject_explicit_bounds(Stmt body, Function func) {
             Expr min_var = Variable::make(Int(32), min_name);
             Expr max_var = Variable::make(Int(32), max_name);
             Expr check = (min_val <= min_var) && (max_val >= max_var);
-            string error_msg = ("Bounds given for " + b.var + " in " + func.name() +
-                                " (from %d to %d) don't cover required region (from %d to %d)");
-            vector<Expr> args = vec<Expr>(min_val, max_val, min_var, max_var);
+            vector<Expr> error_msg = vec<Expr>(
+                "Bounds given for " + b.var + " in " + func.name() +
+                " (from ", min_val, Expr(" to "), max_val,
+                Expr(") don't cover required region (from "),
+                min_var, Expr(" to "), max_var, Expr(")"));
 
             // bounds inference has already respected these values for us
             //body = LetStmt::make(prefix + ".min", min_val, body);
             //body = LetStmt::make(prefix + ".max", max_val, body);
 
-            body = Block::make(AssertStmt::make(check, error_msg, args), body);
+            body = Block::make(AssertStmt::make(check, error_msg), body);
         }
     }
 
@@ -827,6 +822,19 @@ public:
             buffers[op->name] = r;
         }
     }
+
+    void visit(const Variable *op) {
+        if (ends_with(op->name, ".buffer") &&
+            op->param.defined() &&
+            op->param.is_buffer() &&
+            buffers.find(op->param.name()) == buffers.end()) {
+            Result r;
+            r.param = op->param;
+            r.type = op->param.type();
+            r.dimensions = op->param.dimensions();
+            buffers[op->param.name()] = r;
+        }
+    }
 };
 
 /* Find all the externally referenced scalar parameters */
@@ -843,6 +851,25 @@ public:
     }
 };
 
+void realization_order_dfs(string current, map<string, set<string> > &graph, set<string> &visited, set<string> &result_set, vector<string> &order) {
+    set<string> &inputs = graph[current];
+    visited.insert(current);
+
+    for (set<string>::const_iterator i = inputs.begin();
+        i != inputs.end(); ++i) {
+
+        if (visited.find(*i) == visited.end()) {
+            realization_order_dfs(*i, graph, visited, result_set, order);
+        } else if (*i != current) {
+            internal_assert(result_set.find(*i) != result_set.end())
+                << "Stuck in a loop computing a realization order. Perhaps this pipeline has a loop?\n";
+        }
+    }
+
+    result_set.insert(current);
+    order.push_back(current);
+}
+
 vector<string> realization_order(string output, const map<string, Function> &env, map<string, set<string> > &graph) {
     // Make a DAG representing the pipeline. Each function maps to the set describing its inputs.
     // Populate the graph
@@ -856,42 +883,13 @@ vector<string> realization_order(string output, const map<string, Function> &env
         }
     }
 
-    vector<string> result;
+    vector<string> order;
     set<string> result_set;
+    set<string> visited;
 
-    while (true) {
-        // Find a function not in result_set, for which all its inputs are
-        // in result_set. Stop when we reach the output function.
-        bool scheduled_something = false;
-        // Inject a dummy use of this var in case asserts are off.
-        (void)scheduled_something;
-        for (map<string, Function>::const_iterator iter = env.begin();
-             iter != env.end(); ++iter) {
-            const string &f = iter->first;
-            if (result_set.find(f) == result_set.end()) {
-                bool good_to_schedule = true;
-                const set<string> &inputs = graph[f];
-                for (set<string>::const_iterator i = inputs.begin();
-                     i != inputs.end(); ++i) {
-                    if (*i != f && result_set.find(*i) == result_set.end()) {
-                        good_to_schedule = false;
-                    }
-                }
+    realization_order_dfs(output, graph, visited, result_set, order);
 
-                if (good_to_schedule) {
-                    scheduled_something = true;
-                    result_set.insert(f);
-                    result.push_back(f);
-                    debug(4) << "Realization order: " << f << "\n";
-                    if (f == output) return result;
-                }
-            }
-        }
-
-        internal_assert(scheduled_something)
-            << "Stuck in a loop computing a realization order. Perhaps this pipeline has a loop?\n";
-    }
-
+    return order;
 }
 
 Stmt create_initial_loop_nest(Function f, const Target &t) {
@@ -1111,7 +1109,29 @@ class RemoveLoopsOverOutermost : public IRMutator {
 
     void visit(const For *op) {
         if (ends_with(op->name, ".__outermost")) {
-            stmt = op->body;
+            stmt = mutate(op->body);
+        } else {
+            IRMutator::visit(op);
+        }
+    }
+
+    void visit(const Variable *op) {
+        if (ends_with(op->name, ".__outermost.loop_extent")) {
+            expr = 1;
+        } else if (ends_with(op->name, ".__outermost.loop_min")) {
+            expr = 0;
+        } else if (ends_with(op->name, ".__outermost.loop_max")) {
+            expr = 1;
+        } else {
+            expr = op;
+        }
+    }
+
+    void visit(const LetStmt *op) {
+        if (ends_with(op->name, ".__outermost.loop_extent") ||
+            ends_with(op->name, ".__outermost.loop_min") ||
+            ends_with(op->name, ".__outermost.loop_max")) {
+            stmt = mutate(op->body);
         } else {
             IRMutator::visit(op);
         }
@@ -1217,7 +1237,7 @@ Stmt add_parameter_checks(Stmt s, const Target &t) {
     for (size_t i = 0; i < asserts.size(); i++) {
         std::ostringstream oss;
         oss << "Static bounds constraint on parameter violated: " << asserts[i];
-        s = Block::make(AssertStmt::make(asserts[i], oss.str(), vector<Expr>()), s);
+        s = Block::make(AssertStmt::make(asserts[i], oss.str()), s);
     }
 
     return s;
@@ -1231,7 +1251,10 @@ Stmt add_parameter_checks(Stmt s, const Target &t) {
 // inserted. The second is a piece of code which will rewrite the
 // buffer_t sizes, mins, and strides in order to satisfy the
 // requirements.
-Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds &fb) {
+Stmt add_image_checks(Stmt s, Function f, const Target &t,
+                      const vector<string> &order,
+                      const map<string, Function> &env,
+                      const FuncValueBounds &fb) {
 
     bool no_asserts = t.has_feature(Target::NoAsserts);
     bool no_bounds_query = t.has_feature(Target::NoBoundsQuery);
@@ -1329,7 +1352,44 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds
         string buffer_name = is_output_buffer ? f.name() : name;
 
         Box touched = boxes[buffer_name];
-        internal_assert((int)(touched.size()) == dimensions);
+        internal_assert(touched.empty() || (int)(touched.size()) == dimensions);
+
+        // The buffer may be used in one or more extern stage. If so we need to
+        // expand the box touched to include the results of the
+        // top-level bounds query calls to those extern stages.
+        if (param.defined()) {
+            // Find the extern users.
+            vector<string> extern_users;
+            for (size_t i = 0; i < order.size(); i++) {
+                Function f = env.find(order[i])->second;
+                if (f.has_extern_definition()) {
+                    const vector<ExternFuncArgument> &args = f.extern_arguments();
+                    for (size_t j = 0; j < args.size(); j++) {
+                        if ((args[j].image_param.defined() &&
+                             args[j].image_param.name() == param.name()) ||
+                            (args[j].buffer.defined() &&
+                             args[j].buffer.name() == param.name())) {
+                            extern_users.push_back(order[i]);
+                        }
+                    }
+                }
+            }
+
+            // Expand the box by the result of the bounds query from each.
+            for (size_t i = 0; i < extern_users.size(); i++) {
+                const string &extern_user = extern_users[i];
+                Box query_box;
+                Expr query_buf = Variable::make(Handle(), param.name() + ".bounds_query." + extern_user);
+                for (int j = 0; j < dimensions; j++) {
+                    Expr min = Call::make(Int(32), Call::extract_buffer_min,
+                                          vec<Expr>(query_buf, j), Call::Intrinsic);
+                    Expr max = Call::make(Int(32), Call::extract_buffer_max,
+                                          vec<Expr>(query_buf, j), Call::Intrinsic);
+                    query_box.push_back(Interval(min, max));
+                }
+                merge_boxes(touched, query_box);
+            }
+        }
 
         // An expression returning whether or not we're in inference mode
         ReductionDomain rdom;
@@ -1348,9 +1408,13 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds
             int correct_size = type.bytes();
             ostringstream error_msg;
             error_msg << error_name << " has type " << type
-                      << ", but elem_size of the buffer_t passed in is "
-                      << "%d instead of " << correct_size;
-            asserts_elem_size.push_back(AssertStmt::make(elem_size == correct_size, error_msg.str(), vec<Expr>(elem_size)));
+                      << ", but elem_size of the buffer_t passed in is ";
+            vector<Expr> args;
+            args.push_back(error_msg.str());
+            args.push_back(elem_size);
+            args.push_back(Expr(" instead of "));
+            args.push_back(correct_size);
+            asserts_elem_size.push_back(AssertStmt::make(elem_size == correct_size, args));
         }
 
         if (touched.maybe_unused()) {
@@ -1383,9 +1447,6 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds
                 extent_required = select(touched.used, extent_required, actual_extent);
             }
 
-            string error_msg_extent = error_name + " is accessed at %d, which is beyond the max (%d) in dimension " + dim;
-            string error_msg_min = error_name + " is accessed at %d, which is before the min (%d) in dimension " + dim;
-
             string min_required_name = name + ".min." + dim + ".required";
             string extent_required_name = name + ".extent." + dim + ".required";
 
@@ -1395,8 +1456,14 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds
             lets_required.push_back(make_pair(extent_required_name, extent_required));
             lets_required.push_back(make_pair(min_required_name, min_required));
 
-            asserts_required.push_back(AssertStmt::make(actual_min <= min_required_var, error_msg_min,
-                                                        vec<Expr>(min_required_var, actual_min)));
+            vector<Expr> error_msg_min = vec<Expr>(
+                error_name + " is accessed at ",
+                min_required,
+                Expr(", which is before the min ("),
+                actual_min,
+                ") in dimension " + dim);
+
+            asserts_required.push_back(AssertStmt::make(actual_min <= min_required_var, error_msg_min));
 
             Expr actual_max = actual_min + actual_extent - 1;
             Expr max_required = min_required_var + extent_required_var - 1;
@@ -1404,9 +1471,15 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds
             if (touched.maybe_unused()) {
                 max_required = select(touched.used, max_required, actual_max);
             }
-            asserts_required.push_back(AssertStmt::make(actual_max >= max_required,
-                                                        error_msg_extent,
-                                                        vec<Expr>(max_required, actual_max)));
+
+            vector<Expr> error_msg_extent = vec<Expr>(
+                error_name + " is accessed at ",
+                max_required,
+                Expr(", which is beyond the max ("),
+                actual_max,
+                ") in dimension " + dim);
+
+            asserts_required.push_back(AssertStmt::make(actual_max >= max_required, error_msg_extent));
 
             // Come up with a required stride to use in bounds
             // inference mode. We don't assert it. It's just used to
@@ -1434,8 +1507,7 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds
             // systems.
             Expr max_size = cast<int64_t>(0x7fffffff);
             Stmt check = AssertStmt::make((cast<int64_t>(actual_extent) * actual_stride) <= max_size,
-                                          "Total allocation for buffer " + name + " exceeds 2^31 - 1",
-                                          std::vector<Expr>());
+                                          "Total allocation for buffer " + name + " exceeds 2^31 - 1");
             dims_no_overflow_asserts.push_back(check);
 
             // Don't repeat extents check for secondary buffers as extents must be the same as for the first one.
@@ -1449,7 +1521,7 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds
                     lets_overflow.push_back(make_pair(name + ".total_extent." + dim, this_dim));
                     Stmt check = AssertStmt::make(this_dim_var <= max_size,
                                                   "Product of extents for buffer " + name +
-                                                  " exceeds 2^31 - 1", std::vector<Expr>());
+                                                  " exceeds 2^31 - 1");
                     dims_no_overflow_asserts.push_back(check);
                 }
             }
@@ -1509,8 +1581,19 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds
                     stride_constrained = image.stride(i);
                 }
 
-                min_constrained = Variable::make(Int(32), f.name() + ".0.min." + dim);
-                extent_constrained = Variable::make(Int(32), f.name() + ".0.extent." + dim);
+                std::string min0_name = f.name() + ".0.min." + dim;
+                if (replace_with_constrained.count(min0_name) > 0 ) {
+                    min_constrained = replace_with_constrained[min0_name];
+                } else {
+                    min_constrained = Variable::make(Int(32), min0_name);
+                }
+
+                std::string extent0_name = f.name() + ".0.extent." + dim;
+                if (replace_with_constrained.count(extent0_name) > 0 ) {
+                    extent_constrained = replace_with_constrained[extent0_name];
+                } else {
+                    extent_constrained = Variable::make(Int(32), extent0_name);
+                }
             } else if (image.defined() && (int)i < image.dimensions()) {
                 stride_constrained = image.stride(i);
                 extent_constrained = image.extent(i);
@@ -1553,7 +1636,7 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds
                           (min_proposed + extent_proposed >=
                            min_required + extent_required));
             string error = "Applying the constraints to the required region made it smaller";
-            asserts_proposed.push_back(AssertStmt::make((!inference_mode) || check, error, vector<Expr>()));
+            asserts_proposed.push_back(AssertStmt::make((!inference_mode) || check, error));
 
             // stride_required is just a suggestion. It's ok if the
             // constraints shuffle them around in ways that make it
@@ -1578,7 +1661,7 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds
             lets_constrained.push_back(make_pair(constraints[i].first + ".constrained", value));
 
             // Check the var passed in equals the constrained version (when not in inference mode)
-            asserts_constrained.push_back(AssertStmt::make(var == constrained_var, error.str(), vector<Expr>()));
+            asserts_constrained.push_back(AssertStmt::make(var == constrained_var, error.str()));
         }
     }
 
@@ -1656,7 +1739,7 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t, const FuncValueBounds
     return s;
 }
 
-Stmt lower(Function f, const Target &t) {
+Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes) {
     // Compute an environment
     map<string, Function> env = find_transitive_calls(f);
 
@@ -1693,7 +1776,7 @@ Stmt lower(Function f, const Target &t) {
     // The checks will be in terms of the symbols defined by bounds
     // inference.
     debug(1) << "Adding checks for images\n";
-    s = add_image_checks(s, f, t, func_bounds);
+    s = add_image_checks(s, f, t, order, env, func_bounds);
     debug(2) << "Lowering after injecting image checks:\n" << s << '\n';
 
     // This pass injects nested definitions of variable names, so we
@@ -1710,6 +1793,10 @@ Stmt lower(Function f, const Target &t) {
     debug(1) << "Performing allocation bounds inference...\n";
     s = allocation_bounds_inference(s, env, func_bounds);
     debug(2) << "Lowering after allocation bounds inference:\n" << s << '\n';
+
+    debug(1) << "Removing code that depends on undef values...\n";
+    s = remove_undef(s);
+    debug(2) << "Lowering after removing code that depends on undef values:\n" << s << "\n\n";
 
     // This uniquifies the variable names, so we're good to simplify
     // after this point. This lets later passes assume syntactic
@@ -1756,10 +1843,6 @@ Stmt lower(Function f, const Target &t) {
         debug(2) << "Lowering after injecting per-block gpu synchronization:\n" << s << "\n\n";
     }
 
-    debug(1) << "Removing code that depends on undef values...\n";
-    s = remove_undef(s);
-    debug(2) << "Lowering after removing code that depends on undef values:\n" << s << "\n\n";
-
     debug(1) << "Simplifying...\n";
     s = simplify(s);
     s = unify_duplicate_lets(s);
@@ -1786,6 +1869,13 @@ Stmt lower(Function f, const Target &t) {
     s = simplify(s);
     debug(2) << "Lowering after specializing clamped ramps:\n" << s << "\n\n";
 
+    debug(1) << "Specializing branched loops...\n";
+    s = specialize_branched_loops(s);
+    s = remove_dead_allocations(s);
+    s = simplify(s);
+    s = remove_trivial_for_loops(s);
+    debug(2) << "Lowering after specializing branched loops:\n" << s << "\n\n";
+
     debug(1) << "Injecting early frees...\n";
     s = inject_early_frees(s);
     debug(2) << "Lowering after injecting early frees:\n" << s << "\n\n";
@@ -1798,8 +1888,27 @@ Stmt lower(Function f, const Target &t) {
 
     debug(1) << "Simplifying...\n";
     s = common_subexpression_elimination(s);
+
+    if (t.has_feature(Target::OpenGL)) {
+        debug(1) << "Detecting varying attributes...\n";
+        s = find_linear_expressions(s);
+        debug(2) << "Lowering after detecting varying attributes:\n" << s << "\n\n";
+
+        debug(1) << "Moving varying attribute expressions out of the shader...\n";
+        s = setup_gpu_vertex_buffer(s);
+        debug(2) << "Lowering after removing varying attributes:\n" << s << "\n\n";
+    }
+
     s = simplify(s);
     debug(1) << "Lowering after final simplification:\n" << s << "\n\n";
+
+    if (!custom_passes.empty()) {
+        for (size_t i = 0; i < custom_passes.size(); i++) {
+            debug(1) << "Running custom lowering pass " << i << "...\n";
+            s = custom_passes[i]->mutate(s);
+            debug(1) << "Lowering after custom pass " << i << ":\n" << s << "\n\n";
+        }
+    }
 
     return s;
 }

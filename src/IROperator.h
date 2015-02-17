@@ -12,9 +12,9 @@
 namespace Halide {
 
 namespace Internal {
-/** Is the expression either an IntImm, a FloatImm, or a Cast of the
- * same, or a Ramp or Broadcast of the same. Doesn't do any constant
- * folding. */
+/** Is the expression either an IntImm, a FloatImm, a StringImm, or a
+ * Cast of the same, or a Ramp or Broadcast of the same. Doesn't do
+ * any constant folding. */
 EXPORT bool is_const(Expr e);
 
 /** Is the expression an IntImm, FloatImm of a particular value, or a
@@ -60,6 +60,10 @@ EXPORT bool is_one(Expr e);
 /** Is the expression a const (as defined by is_const), and also equal
  * to two (in all lanes, if a vector expression) */
 EXPORT bool is_two(Expr e);
+
+/** Is the statement a no-op (which we represent as either an
+ * undefined Stmt, or as an Evaluate node of a constant) */
+EXPORT bool is_no_op(Stmt s);
 
 /** Given an integer value, cast it into a designated integer type
  * and return the bits as int. Unsigned types are returned as bits in the int
@@ -389,6 +393,31 @@ inline Expr abs(Expr a) {
                                 vec(a), Internal::Call::Intrinsic);
 }
 
+/** Return the absolute difference between two values. Vectorizes
+ * cleanly. Returns an unsigned value of the same bit width. There are
+ * various ways to write this yourself, but they contain numerous
+ * gotchas and don't always compile to good code, so use this
+ * instead. */
+inline Expr absd(Expr a, Expr b) {
+    user_assert(a.defined() && b.defined()) << "absd of undefined Expr\n";
+    Internal::match_types(a, b);
+    Type t = a.type();
+
+    if (t.is_float()) {
+        // Floats can just use abs.
+        return abs(a - b);
+    }
+
+    if (t.is_int()) {
+        // The argument may be signed, but the return type is unsigned.
+        t.code = Type::UInt;
+    }
+
+    return Internal::Call::make(t, Internal::Call::absd,
+                                vec(a, b),
+                                Internal::Call::Intrinsic);
+}
+
 /** Returns an expression similar to the ternary operator in C, except
  * that it always evaluates all arguments. If the first argument is
  * true, then return the second, else return the third. Typically
@@ -407,6 +436,15 @@ inline Expr select(Expr condition, Expr true_value, Expr false_value) {
     if (as_const_int(false_value)) {
         false_value = cast(true_value.type(), false_value);
     }
+
+    user_assert(condition.type().is_bool())
+        << "The first argument to a select must be a boolean:\n"
+        << "  " << condition << " has type " << condition.type() << "\n";
+
+    user_assert(true_value.type() == false_value.type())
+        << "The second and third arguments to a select do not have a matching type:\n"
+        << "  " << true_value << " has type " << true_value.type() << "\n"
+        << "  " << false_value << " has type " << false_value.type() << "\n";
 
     return Internal::Select::make(condition, true_value, false_value);
 }
@@ -481,6 +519,66 @@ inline Expr select(Expr c1, Expr v1,
                   c5, v5,
                   c6, v6,
                   select(c7, v7, default_val));
+}
+inline Expr select(Expr c1, Expr v1,
+                   Expr c2, Expr v2,
+                   Expr c3, Expr v3,
+                   Expr c4, Expr v4,
+                   Expr c5, Expr v5,
+                   Expr c6, Expr v6,
+                   Expr c7, Expr v7,
+                   Expr c8, Expr v8,
+                   Expr default_val) {
+    return select(c1, v1,
+                  c2, v2,
+                  c3, v3,
+                  c4, v4,
+                  c5, v5,
+                  c6, v6,
+                  c7, v7,
+                  select(c8, v8, default_val));
+}
+inline Expr select(Expr c1, Expr v1,
+                   Expr c2, Expr v2,
+                   Expr c3, Expr v3,
+                   Expr c4, Expr v4,
+                   Expr c5, Expr v5,
+                   Expr c6, Expr v6,
+                   Expr c7, Expr v7,
+                   Expr c8, Expr v8,
+                   Expr c9, Expr v9,
+                   Expr default_val) {
+    return select(c1, v1,
+                  c2, v2,
+                  c3, v3,
+                  c4, v4,
+                  c5, v5,
+                  c6, v6,
+                  c7, v7,
+                  c8, v8,
+                  select(c9, v9, default_val));
+}
+inline Expr select(Expr c1, Expr v1,
+                   Expr c2, Expr v2,
+                   Expr c3, Expr v3,
+                   Expr c4, Expr v4,
+                   Expr c5, Expr v5,
+                   Expr c6, Expr v6,
+                   Expr c7, Expr v7,
+                   Expr c8, Expr v8,
+                   Expr c9, Expr v9,
+                   Expr c10, Expr v10,
+                   Expr default_val) {
+    return select(c1, v1,
+                  c2, v2,
+                  c3, v3,
+                  c4, v4,
+                  c5, v5,
+                  c6, v6,
+                  c7, v7,
+                  c8, v8,
+                  c9, v9,
+                  select(c10, v10, default_val));
 }
 // @}
 
@@ -675,8 +773,7 @@ inline Expr exp(Expr x) {
     if (x.type() == Float(64)) {
         return Internal::Call::make(Float(64), "exp_f64", vec(x), Internal::Call::Extern);
     } else {
-        // return Internal::Call::make(Float(32), "exp_f32", vec(cast<float>(x)), Internal::Call::Extern);
-        return Internal::halide_exp(cast<float>(x));
+        return Internal::Call::make(Float(32), "exp_f32", vec(cast<float>(x)), Internal::Call::Extern);
     }
 }
 
@@ -692,8 +789,7 @@ inline Expr log(Expr x) {
     if (x.type() == Float(64)) {
         return Internal::Call::make(Float(64), "log_f64", vec(x), Internal::Call::Extern);
     } else {
-        // return Internal::Call::make(Float(32), "log_f32", vec(cast<float>(x)), Internal::Call::Extern);
-        return Internal::halide_log(cast<float>(x));
+        return Internal::Call::make(Float(32), "log_f32", vec(cast<float>(x)), Internal::Call::Extern);
     }
 }
 
@@ -716,7 +812,7 @@ inline Expr pow(Expr x, Expr y) {
     } else {
         x = cast<float>(x);
         y = cast<float>(y);
-        return Internal::halide_exp(Internal::halide_log(x) * y);
+        return Internal::Call::make(Float(32), "pow_f32", vec(x, y), Internal::Call::Extern);
     }
 }
 
@@ -754,16 +850,33 @@ inline Expr fast_pow(Expr x, Expr y) {
     return select(x == 0.0f, 0.0f, fast_exp(fast_log(x) * y));
 }
 
+/** Fast approximate inverse for Float(32). Corresponds to the rcpps
+ * instruction on x86, and the vrecpe instruction on ARM. Vectorizes
+ * cleanly. */
+inline Expr fast_inverse(Expr x) {
+    user_assert(x.type() == Float(32)) << "fast_inverse only takes float arguments\n";
+    return Internal::Call::make(x.type(), "fast_inverse_f32", vec(x), Internal::Call::Extern);
+}
+
+/** Fast approximate inverse square root for Float(32). Corresponds to
+ * the rsqrtps instruction on x86, and the vrsqrte instruction on
+ * ARM. Vectorizes cleanly. */
+inline Expr fast_inverse_sqrt(Expr x) {
+    user_assert(x.type() == Float(32)) << "fast_inverse_sqrt only takes float arguments\n";
+    return Internal::Call::make(x.type(), "fast_inverse_sqrt_f32", vec(x), Internal::Call::Extern);
+}
+
 /** Return the greatest whole number less than or equal to a
  * floating-point expression. If the argument is not floating-point,
  * it is cast to Float(32). The return value is still in floating
  * point, despite being a whole number. Vectorizes cleanly. */
 inline Expr floor(Expr x) {
     user_assert(x.defined()) << "floor of undefined Expr\n";
-    if (x.type() == Float(64)) {
-        return Internal::Call::make(Float(64), "floor_f64", vec(x), Internal::Call::Extern);
+    if (x.type().element_of() == Float(64)) {
+        return Internal::Call::make(x.type(), "floor_f64", vec(x), Internal::Call::Extern);
     } else {
-        return Internal::Call::make(Float(32), "floor_f32", vec(cast<float>(x)), Internal::Call::Extern);
+        Type t = Float(32, x.type().width);
+        return Internal::Call::make(t, "floor_f32", vec(cast(t, x)), Internal::Call::Extern);
     }
 }
 
@@ -773,24 +886,62 @@ inline Expr floor(Expr x) {
  * point, despite being a whole number. Vectorizes cleanly. */
 inline Expr ceil(Expr x) {
     user_assert(x.defined()) << "ceil of undefined Expr\n";
-    if (x.type() == Float(64)) {
-        return Internal::Call::make(Float(64), "ceil_f64", vec(x), Internal::Call::Extern);
+    if (x.type().element_of() == Float(64)) {
+        return Internal::Call::make(x.type(), "ceil_f64", vec(x), Internal::Call::Extern);
     } else {
-        return Internal::Call::make(Float(32), "ceil_f32", vec(cast<float>(x)), Internal::Call::Extern);
+        Type t = Float(32, x.type().width);
+        return Internal::Call::make(t, "ceil_f32", vec(cast(t, x)), Internal::Call::Extern);
     }
 }
 
-/** Return the whole number closest to a floating-point expression. If
- * the argument is not floating-point, it is cast to Float(32). The
- * return value is still in floating point, despite being a whole
- * number. On ties, we round up. Vectorizes cleanly. */
+/** Return the whole number closest to a floating-point expression. If the
+ * argument is not floating-point, it is cast to Float(32). The return value
+ * is still in floating point, despite being a whole number. On ties, we
+ * follow IEEE754 conventions and round to the nearest even number. Vectorizes
+ * cleanly. */
 inline Expr round(Expr x) {
     user_assert(x.defined()) << "round of undefined Expr\n";
-    if (x.type() == Float(64)) {
+    if (x.type().element_of() == Float(64)) {
         return Internal::Call::make(Float(64), "round_f64", vec(x), Internal::Call::Extern);
     } else {
-        return Internal::Call::make(Float(32), "round_f32", vec(cast<float>(x)), Internal::Call::Extern);
+        Type t = Float(32, x.type().width);
+        return Internal::Call::make(t, "round_f32", vec(cast(t, x)), Internal::Call::Extern);
     }
+}
+
+/** Return the integer part of a floating-point expression. If the argument is
+ * not floating-point, it is cast to Float(32). The return value is still in
+ * floating point, despite being a whole number. Vectorizes cleanly. */
+inline Expr trunc(Expr x) {
+    user_assert(x.defined()) << "trunc of undefined Expr\n";
+    if (x.type().element_of() == Float(64)) {
+        return Internal::Call::make(Float(64), "trunc_f64", vec(x), Internal::Call::Extern);
+    } else {
+        Type t = Float(32, x.type().width);
+        return Internal::Call::make(t, "trunc_f32", vec(cast(t, x)), Internal::Call::Extern);
+    }
+}
+
+/** Returns true if the argument is a Not a Number (NaN). Requires a
+  * floating point argument.  Vectorizes cleanly. */
+inline Expr is_nan(Expr x) {
+    user_assert(x.defined()) << "is_nan of undefined Expr\n";
+    user_assert(x.type().is_float()) << "is_nan only works for float";
+    Type t = Bool(x.type().width);
+    if (x.type().element_of() == Float(64)) {
+        return Internal::Call::make(t, "is_nan_f64", vec(x), Internal::Call::Extern);
+    } else {
+        Type ft = Float(32, x.type().width);
+        return Internal::Call::make(t, "is_nan_f32", vec(cast(ft, x)), Internal::Call::Extern);
+    }
+}
+
+/** Return the fractional part of a floating-point expression. If the argument
+ *  is not floating-point, it is cast to Float(32). The return value has the
+ *  same sign as the original expression. Vectorizes cleanly. */
+inline Expr fract(Expr x) {
+    user_assert(x.defined()) << "fract of undefined Expr\n";
+    return x - trunc(x);
 }
 
 /** Reinterpret the bits of one value as another type. */

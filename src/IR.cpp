@@ -37,6 +37,7 @@ IntImm IntImm::small_int_cache[] = {make_immortal_int(-8),
 
 Expr Cast::make(Type t, Expr v) {
     internal_assert(v.defined()) << "Cast of undefined\n";
+    internal_assert(t.width == v.type().width) << "Cast may not change vector widths\n";
 
     Cast *node = new Cast;
     node->type = t;
@@ -242,7 +243,7 @@ Expr Select::make(Expr condition, Expr true_value, Expr false_value) {
     internal_assert(condition.defined()) << "Select of undefined\n";
     internal_assert(true_value.defined()) << "Select of undefined\n";
     internal_assert(false_value.defined()) << "Select of undefined\n";
-    internal_assert(condition.type().is_bool()) << "First argument to Select is not a bool\n";
+    internal_assert(condition.type().is_bool()) << "First argument to Select is not a bool: " << condition.type() << "\n";
     internal_assert(false_value.type() == true_value.type()) << "Select of mismatched types\n";
     internal_assert(condition.type().is_scalar() ||
                     condition.type().width == true_value.type().width)
@@ -288,7 +289,7 @@ Expr Ramp::make(Expr base, Expr stride, int width) {
 Expr Broadcast::make(Expr value, int width) {
     internal_assert(value.defined()) << "Broadcast of undefined\n";
     internal_assert(value.type().is_scalar()) << "Broadcast of vector\n";
-    internal_assert(width > 1) << "Broadcast of width <= 1\n";
+    internal_assert(width != 1) << "Broadcast of width 1\n";
 
     Broadcast *node = new Broadcast;
     node->type = value.type().vector_of(width);
@@ -320,14 +321,23 @@ Stmt LetStmt::make(std::string name, Expr value, Stmt body) {
     return node;
 }
 
-Stmt AssertStmt::make(Expr condition, std::string message, const std::vector<Expr> &args) {
+Stmt AssertStmt::make(Expr condition, Expr message) {
     internal_assert(condition.defined()) << "AssertStmt of undefined\n";
 
     AssertStmt *node = new AssertStmt;
     node->condition = condition;
     node->message = message;
-    node->args = args;
     return node;
+}
+
+Stmt AssertStmt::make(Expr condition, const char * message) {
+    return AssertStmt::make(condition, Expr(message));
+}
+
+Stmt AssertStmt::make(Expr condition, const std::vector<Expr> &message) {
+    internal_assert(!message.empty()) << "Assert with empty message\n";
+    Expr m = Call::make(Handle(), Call::stringify, message, Call::Intrinsic);
+    return AssertStmt::make(condition, m);
 }
 
 Stmt Pipeline::make(std::string name, Stmt produce, Stmt update, Stmt consume) {
@@ -393,13 +403,14 @@ Stmt Allocate::make(std::string name, Type type, const std::vector<Expr> &extent
         internal_assert(extents[i].type().is_scalar() == 1) << "Allocate of vector extent\n";
     }
     internal_assert(body.defined()) << "Allocate of undefined\n";
+    internal_assert(condition.defined()) << "Allocate with undefined condition\n";
+    internal_assert(condition.type().is_bool()) << "Allocate condition is not boolean\n";
 
     Allocate *node = new Allocate;
     node->name = name;
     node->type = type;
     node->extents = extents;
     node->condition = condition;
-
     node->body = body;
     return node;
 }
@@ -419,6 +430,8 @@ Stmt Realize::make(const std::string &name, const std::vector<Type> &types, cons
     }
     internal_assert(body.defined()) << "Realize of undefined\n";
     internal_assert(!types.empty()) << "Realize has empty type\n";
+    internal_assert(condition.defined()) << "Realize with undefined condition\n";
+    internal_assert(condition.type().is_bool()) << "Realize condition is not boolean\n";
 
     Realize *node = new Realize;
     node->name = name;
@@ -555,11 +568,13 @@ const string Call::bitwise_or = "bitwise_or";
 const string Call::shift_left = "shift_left";
 const string Call::shift_right = "shift_right";
 const string Call::abs = "abs";
+const string Call::absd = "absd";
 const string Call::lerp = "lerp";
 const string Call::random = "random";
 const string Call::rewrite_buffer = "rewrite_buffer";
 const string Call::profiling_timer = "profiling_timer";
 const string Call::create_buffer_t = "create_buffer_t";
+const string Call::copy_buffer_t = "copy_buffer_t";
 const string Call::extract_buffer_min = "extract_buffer_min";
 const string Call::extract_buffer_max = "extract_buffer_max";
 const string Call::set_host_dirty = "set_host_dirty";
@@ -576,6 +591,9 @@ const string Call::return_second = "return_second";
 const string Call::if_then_else = "if_then_else";
 const string Call::glsl_texture_load = "glsl_texture_load";
 const string Call::glsl_texture_store = "glsl_texture_store";
+const string Call::glsl_varying = "glsl_varying";
+const string Call::make_struct = "make_struct";
+const string Call::stringify = "stringify";
 const string Call::memoize_expr = "memoize_expr";
 const string Call::copy_memory = "copy_memory";
 

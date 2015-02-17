@@ -14,6 +14,7 @@ else()
   add_definitions("-D__STDC_LIMIT_MACROS")
   add_definitions("-D__STDC_CONSTANT_MACROS")
   add_definitions("-std=c++11")
+  add_definitions("-fno-rtti")
   set(RUNTIME_DEBUG_FLAG "-g")
 endif()
 
@@ -105,8 +106,11 @@ set(RUNTIME_CPP
   windows_opencl
   windows_io
   posix_print
+  to_string
   cache
-  nacl_host_cpu_count)
+  nacl_host_cpu_count
+  module_jit_ref_count
+  module_aot_ref_count)
 set (RUNTIME_LL
   arm
   aarch64
@@ -140,6 +144,12 @@ set (ARCHS 32 64)
 set(INITIAL_MODULES )
 foreach (i ${RUNTIME_CPP} )
   foreach (j ${ARCHS} )
+    # -m64 isn't respected unless we also use a 64-bit target.
+    IF (ARCHS EQUAL 32)
+      set(TARGET "i386-unknown-unknown-unknown")
+    ELSE()
+      set(TARGET "x86_64-unknown-unknown-unknown")
+    ENDIF()
     set(SOURCE "${NATIVE_RUNTIME_DIR}${i}.cpp")
     set(LL_D "${PROJECT_BINARY_DIR}/${PROJECT_NAME}.build/${NATIVE_INT_DIR}initmod.${i}_${j}_debug.ll")
     set(LL "${PROJECT_BINARY_DIR}/${PROJECT_NAME}.build/${NATIVE_INT_DIR}initmod.${i}_${j}.ll")
@@ -150,21 +160,21 @@ foreach (i ${RUNTIME_CPP} )
 
     add_custom_command(OUTPUT "${LL_D}"
                        DEPENDS "${SOURCE}"
-                       COMMAND ${CLANG} ${CXX_WARNING_FLAGS} ${RUNTIME_DEBUG_FLAG} -DDEBUG_RUNTIME -fno-ms-compatibility -ffreestanding -fno-blocks -fno-exceptions -m${j} "-I${NATIVE_RUNTIME_DIR}" -DCOMPILING_HALIDE_RUNTIME "-DLLVM_VERSION=${LLVM_VERSION}" -DBITS_${j} -emit-llvm -S "${SOURCE}" -o "${LL_D}"
+                       COMMAND ${CLANG} ${CXX_WARNING_FLAGS} ${RUNTIME_DEBUG_FLAG} -DDEBUG_RUNTIME -fno-ms-compatibility -ffreestanding -fno-blocks -fno-exceptions -fno-unwind-tables -m${j} -target "${TARGET}" "-I${NATIVE_RUNTIME_DIR}" -DCOMPILING_HALIDE_RUNTIME "-DLLVM_VERSION=${LLVM_VERSION}" -DBITS_${j} -emit-llvm -S "${SOURCE}" -o "${LL_D}"
                        COMMENT "${SOURCE} -> ${LL_D}")
     add_custom_command(OUTPUT "${LL}"
                        DEPENDS "${SOURCE}"
-                       COMMAND ${CLANG} ${CXX_WARNING_FLAGS} -fno-ms-compatibility -ffreestanding -fno-blocks -fno-exceptions -m${j} "-I${NATIVE_RUNTIME_DIR}" -DCOMPILING_HALIDE_RUNTIME "-DLLVM_VERSION=${LLVM_VERSION}" -DBITS_${j} -emit-llvm -S "${SOURCE}" -o "${LL}"
+                       COMMAND ${CLANG} ${CXX_WARNING_FLAGS} -fno-ms-compatibility -ffreestanding -fno-blocks -fno-exceptions -fno-unwind-tables -m${j} -target "${TARGET}" "-I${NATIVE_RUNTIME_DIR}" -DCOMPILING_HALIDE_RUNTIME "-DLLVM_VERSION=${LLVM_VERSION}" -DBITS_${j} -emit-llvm -S "${SOURCE}" -o "${LL}"
                        COMMENT "${SOURCE} -> ${LL}")
 
     add_custom_command(OUTPUT "${BC_D}"
                        DEPENDS "${LL_D}"
                        COMMAND "${LLVM_AS}" "${LL_D}" -o "${BC_D}"
-		       COMMENT "${LL_D} -> ${BC_D}")
+                       COMMENT "${LL_D} -> ${BC_D}")
     add_custom_command(OUTPUT "${BC}"
                        DEPENDS "${LL}"
                        COMMAND "${LLVM_AS}" "${LL}" -o "${BC}"
-		       COMMENT "${LL} -> ${BC}")
+                       COMMENT "${LL} -> ${BC}")
 
     add_custom_command(OUTPUT "${INITMOD_D}"
                        DEPENDS "${BC_D}"
@@ -245,7 +255,7 @@ set(HEADER_FILES
   IRVisitor.h
   InjectOpenGLIntrinsics.h
   InjectHostDevBufferCopies.h
-  JITCompiledModule.h
+  JITModule.h
   Lambda.h
   Debug.h
   Lower.h
@@ -268,6 +278,7 @@ set(HEADER_FILES
   Tracing.h
   UnrollLoops.h
   Var.h
+  VaryingAttributes.h
   VectorizeLoops.h
   CodeGen_Posix.h
   CodeGen_ARM.h
@@ -294,7 +305,14 @@ set(HEADER_FILES
   HumanReadableStmt.h
   StmtToHtml.h
   Memoization.h
-  CodeGen_MIPS.h)
+  CodeGen_MIPS.h
+  Generator.h
+  ObjectInstanceRegistry.h
+  BlockFlattening.h
+  LinearSolve.h
+  BranchVisitors.h
+  SpecializeBranchedLoops.h
+  RemoveDeadAllocations.h)
 
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/include")
 file(TO_NATIVE_PATH "${CMAKE_BINARY_DIR}/include/" NATIVE_INCLUDE_PATH)
@@ -358,7 +376,7 @@ add_library(Halide ${HALIDE_LIBRARY_TYPE}
   Deinterleave.cpp
   DebugToFile.cpp
   Type.cpp
-  JITCompiledModule.cpp
+  JITModule.cpp
   EarlyFree.cpp
   UniquifyVariableNames.cpp
   CSE.cpp
@@ -373,6 +391,7 @@ add_library(Halide ${HALIDE_LIBRARY_TYPE}
   Inline.cpp
   Qualify.cpp
   UnifyDuplicateLets.cpp
+  VaryingAttributes.cpp
   ExprUsesVar.cpp
   Introspection.cpp
   Buffer.cpp
@@ -390,13 +409,37 @@ add_library(Halide ${HALIDE_LIBRARY_TYPE}
   StmtToHtml.cpp
   Memoization.cpp
   CodeGen_MIPS.cpp
+  Generator.cpp
+  ObjectInstanceRegistry.cpp
+  BlockFlattening.cpp
+  LinearSolve.cpp
+  BranchVisitors.cpp
+  SpecializeBranchedLoops.cpp
+  RemoveDeadAllocations.cpp
   "${CMAKE_BINARY_DIR}/include/Halide.h"
   ${HEADER_FILES})
 
-target_link_libraries(Halide InitialModules ${LIBS})
+# CMake's Xcode generator will run otool on all of the ${LIBS} if we pass them
+# to target_link_libraries. This makes the CMake generation step take a very
+# long time. Instead, since we add the libs to the extra.LinkFileList passed to
+# Xcode below it is not necessary to pass them to target_link_libraries as well.
+if (XCODE)
+  target_link_libraries(Halide InitialModules)
+else()
+  target_link_libraries(Halide InitialModules ${LIBS})
+endif()
 
 if (NOT WIN32)
-  target_link_libraries(Halide dl pthread z tinfo)
+  if (${LLVM_VERSION} GREATER 34)
+    execute_process(COMMAND "${LLVM_CONFIG}" --system-libs OUTPUT_VARIABLE EXTRA_LIBS)
+  else()
+    execute_process(COMMAND "${LLVM_CONFIG}" --ldflags OUTPUT_VARIABLE EXTRA_LIBS)
+  endif()
+  string(STRIP EXTRA_LIBS "${EXTRA_LIBS}")
+  string(REPLACE "-l" ";" EXTRA_LIBS "${EXTRA_LIBS}")
+  string(REPLACE "\n" "" EXTRA_LIBS "${EXTRA_LIBS}")
+  string(REPLACE " " "" EXTRA_LIBS "${EXTRA_LIBS}")
+  target_link_libraries(Halide ${EXTRA_LIBS})
 endif()
 
 if (NOT HALIDE_SHARED_LIBRARY)
@@ -409,7 +452,7 @@ if (NOT HALIDE_SHARED_LIBRARY)
 
 if (XCODE)
 
-# Create a
+# Create a link file list
 set(EXTRA_LINKFILELIST "${PROJECT_BINARY_DIR}/${PROJECT_NAME}.build/extra.LinkFileList")
 
 # Determine the location of libInitialModules.a so we can include the path to it

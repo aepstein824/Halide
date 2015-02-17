@@ -376,13 +376,8 @@ private:
     }
 
     void visit(const Div *op) {
-
         op->a.accept(this);
         Expr min_a = min, max_a = max;
-        if (!min_a.defined() || !max_a.defined()) {
-            min = Expr(); max = Expr(); return;
-        }
-
         op->b.accept(this);
         Expr min_b = min, max_b = max;
         if (!min_b.defined() || !max_b.defined()) {
@@ -401,12 +396,16 @@ private:
                 min = Expr();
                 max = Expr();
             } else if (is_positive_const(min_b) || op->type.is_uint()) {
-                min = min_a / min_b;
-                max = max_a / min_b;
+                min = min_a.defined()? min_a / min_b: Expr();
+                max = max_a.defined()? max_a / min_b: Expr();
             } else if (is_negative_const(min_b)) {
-                min = max_a / min_b;
-                max = min_a / min_b;
+                min = max_a.defined()? max_a / min_b: Expr();
+                max = min_a.defined()? min_a / min_b: Expr();
             } else {
+                if (!min_a.defined() || !max_a.defined()) {
+                    min = Expr(); max = Expr(); return;
+                }
+
                 // Sign of b is unknown
                 Expr a = min_a / min_b;
                 Expr b = max_a / max_b;
@@ -415,6 +414,10 @@ private:
                 max = select(cmp, b, a);
             }
         } else {
+            if (!min_a.defined() || !max_a.defined()) {
+                min = Expr(); max = Expr(); return;
+            }
+
             // if we can't statically prove that the divisor can't span zero, then we're unbounded
             int min_sign = static_sign(min_b);
             int max_sign = static_sign(max_b);
@@ -686,6 +689,15 @@ private:
             // Probably more conservative than necessary
             Expr equivalent_select = Select::make(op->args[0], op->args[1], op->args[2]);
             equivalent_select.accept(this);
+        } else if (op->call_type == Call::Intrinsic && 
+                   (op->name == Call::shift_left || op->name == Call::shift_right || op->name == Call::bitwise_and)) {
+            Expr simplified = simplify(op);
+            if (!simplified.same_as(op)) {
+                simplified.accept(this);
+            } else {
+                // Just use the bounds of the type
+                bounds_of_type(op->type);
+            }
         } else if (op->args.size() == 1 && min.defined() && max.defined() &&
                    (op->name == "ceil_f32" || op->name == "ceil_f64" ||
                     op->name == "floor_f32" || op->name == "floor_f64" ||
@@ -716,8 +728,12 @@ private:
             min = Call::make(Int(32), Call::extract_buffer_min, op->args, Call::Intrinsic);
             max = Call::make(Int(32), Call::extract_buffer_max, op->args, Call::Intrinsic);
         } else if (op->call_type == Call::Intrinsic && op->name == Call::memoize_expr) {
-            assert(op->args.size() >= 1);
+            internal_assert(op->args.size() >= 1);
             op->args[0].accept(this);
+        } else if (op->call_type == Call::Intrinsic && op->name == Call::trace_expr) {
+            // trace_expr returns argument 4
+            internal_assert(op->args.size() >= 5);
+            op->args[4].accept(this);
         } else if (op->func.has_pure_definition()) {
             bounds_of_func(op->func, op->value_index);
         } else {

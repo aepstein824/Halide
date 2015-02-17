@@ -36,8 +36,8 @@ StmtCompiler::StmtCompiler(Target target) {
             contents = new CodeGen_GPU_Host<CodeGen_MIPS>(target);
         }
 #endif
-#ifdef WITH_PNACL
-        if (target.arch == Target::PNACL) {
+#ifdef WITH_NATIVE_CLIENT
+        if (target.arch == Target::PNaCl) {
             contents = new CodeGen_GPU_Host<CodeGen_PNaCl>(target);
         }
 #endif
@@ -70,7 +70,7 @@ void StmtCompiler::compile_to_native(const string &filename, bool assembly) {
     contents.ptr->compile_to_native(filename, assembly);
 }
 
-JITCompiledModule StmtCompiler::compile_to_function_pointers() {
+JITModule StmtCompiler::compile_to_function_pointers() {
     return contents.ptr->compile_to_function_pointers();
 }
 

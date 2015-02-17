@@ -60,6 +60,7 @@ public:
                 } else if (extern_args[i].is_buffer()) {
                     // Function with an extern definition
                     record(Halide::Internal::Parameter(extern_args[i].buffer.type(), true,
+                                                       extern_args[i].buffer.dimensions(),
                                                        extern_args[i].buffer.name()));
                 } else if (extern_args[i].is_image_param()) {
                     record(extern_args[i].image_param);
@@ -326,13 +327,16 @@ public:
         args.push_back(key_size());
         args.push_back(Variable::make(type_of<buffer_t *>(), computed_bounds_name));
         args.push_back(tuple_count);
+        std::vector<Expr> buffers;
         if (tuple_count == 1) {
-            args.push_back(Variable::make(type_of<buffer_t *>(), storage_base_name + ".buffer"));
+            buffers.push_back(Variable::make(type_of<buffer_t *>(), storage_base_name + ".buffer"));
         } else {
             for (int32_t i = 0; i < tuple_count; i++) {
-                args.push_back(Variable::make(type_of<buffer_t *>(), storage_base_name + "." + int_to_string(i) + ".buffer"));
+                buffers.push_back(Variable::make(type_of<buffer_t *>(), storage_base_name + "." + int_to_string(i) + ".buffer"));
             }
         }
+        args.push_back(Call::make(type_of<buffer_t **>(), Call::make_struct, buffers, Call::Intrinsic));
+
         return Call::make(Bool(1), "halide_memoization_cache_lookup", args, Call::Extern);
     }
 
@@ -346,13 +350,15 @@ public:
         args.push_back(key_size());
         args.push_back(Variable::make(type_of<buffer_t *>(), computed_bounds_name));
         args.push_back(tuple_count);
+        std::vector<Expr> buffers;
         if (tuple_count == 1) {
-            args.push_back(Variable::make(type_of<buffer_t *>(), storage_base_name + ".buffer"));
+            buffers.push_back(Variable::make(type_of<buffer_t *>(), storage_base_name + ".buffer"));
         } else {
             for (int32_t i = 0; i < tuple_count; i++) {
-                args.push_back(Variable::make(type_of<buffer_t *>(), storage_base_name + "." + int_to_string(i) + ".buffer"));
+                buffers.push_back(Variable::make(type_of<buffer_t *>(), storage_base_name + "." + int_to_string(i) + ".buffer"));
             }
         }
+        args.push_back(Call::make(type_of<buffer_t **>(), Call::make_struct, buffers, Call::Intrinsic));
 
         // This is actually a void call. How to indicate that? Look at Extern_ stuff.
         return Evaluate::make(Call::make(Bool(), "halide_memoization_cache_store", args, Call::Extern));
@@ -432,7 +438,7 @@ private:
             Stmt computed_bounds_let = LetStmt::make(computed_bounds_name, computed_bounds, cache_lookup);
 
             Stmt generate_key = Block::make(key_info.generate_key(cache_key_name), computed_bounds_let);
-            Stmt cache_key_alloc = Allocate::make(cache_key_name, UInt(8), vec(key_info.key_size()), true, generate_key);
+            Stmt cache_key_alloc = Allocate::make(cache_key_name, UInt(8), vec(key_info.key_size()), const_true(), generate_key);
 
             stmt = cache_key_alloc;
         } else {
@@ -442,7 +448,7 @@ private:
 };
 
 Stmt inject_memoization(Stmt s, const std::map<std::string, Function> &env,
-			const std::string &name) {
+                        const std::string &name) {
     InjectMemoization injector(env, name);
 
     return injector.mutate(s);

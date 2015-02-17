@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <map>
 #include <string>
+#include <limits>
 
 #include "Profiling.h"
 #include "IRMutator.h"
@@ -22,6 +23,11 @@ int profiling_level() {
     return trace ? atoi(trace) : 0;
 }
 
+int profiling_loop_level() {
+    char *loop_level = getenv("HL_PROFILE_LOOP_LEVEL");
+    return loop_level ? atoi(loop_level) : std::numeric_limits<int>::max();
+}
+
 using std::map;
 using std::string;
 using std::vector;
@@ -30,6 +36,8 @@ class InjectProfiling : public IRMutator {
 public:
     InjectProfiling(string func_name)
         : level(profiling_level()),
+          maximum_loop_level(profiling_loop_level()),
+          current_loop_level(0),
           func_name(sanitize(func_name)) {
     }
 
@@ -43,13 +51,13 @@ public:
                 PushCallStack st(this, kToplevel, kToplevel);
                 s = mutate(s);
             }
-            s = add_ticks(kToplevel, kToplevel, s);
+            s = add_count_and_ticks(kToplevel, kToplevel, s);
             s = add_nsec(kToplevel, kToplevel, s);
 
             // Note that this is tacked on to the front of the block, since it must come
             // before the calls to halide_current_time_ns.
             Expr begin_clock_call = Call::make(Int(32), "halide_start_clock", vector<Expr>(), Call::Extern);
-            Stmt begin_clock = AssertStmt::make(begin_clock_call == 0, "Failed to start clock", vector<Expr>());
+            Stmt begin_clock = AssertStmt::make(begin_clock_call == 0, "Failed to start clock");
             s = Block::make(begin_clock, s);
 
             // Do a little calibration: make a loop that does a large number of calls to add_ticks
@@ -84,9 +92,8 @@ public:
             for (map<string, int>::const_iterator it = indices.begin(); it != indices.end(); ++it) {
                 int idx = it->second;
                 Expr val = Load::make(UInt(64), kBufName, idx, Buffer(), Parameter());
-                Expr print_val = Call::make(Int(32), "halide_printf",
-                                            vec<Expr>(it->first + " %llu\n", val), Call::Extern);
-                Stmt print_stmt = AssertStmt::make(print_val > 0, "halide_printf failed", vector<Expr>());
+                Expr print_val = print(it->first, val);
+                Stmt print_stmt = Evaluate::make(print_val);
                 s = Block::make(s, print_stmt);
             }
 
@@ -107,6 +114,8 @@ private:
     using IRMutator::visit;
 
     const int level;
+    const int maximum_loop_level;
+    int current_loop_level;
     const string func_name;
     map<string, int> indices;   // map name -> index in buffer.
     vector<string> call_stack;  // names of the nodes upstream
@@ -216,18 +225,21 @@ private:
     }
 
     void visit(const For *op) {
+        current_loop_level++;
         if (op->for_type == For::Parallel && level >= 1) {
             std::cerr << "Warning: The Halide profiler does not yet support "
                       << "parallel schedules. Not profiling inside the loop over "
                       << op->name << "\n";
             stmt = op;
         } else {
+            PushCallStack st(this, "forloop", op->name);
             IRMutator::visit(op);
         }
         // We only instrument loops at profiling level 2 or higher
-        if (level >= 2) {
+        if (level >= 2 && current_loop_level <= maximum_loop_level) {
             stmt = add_count_and_ticks("forloop", op->name, stmt);
         }
+        current_loop_level--;
     }
 };
 

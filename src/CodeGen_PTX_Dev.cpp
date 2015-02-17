@@ -102,9 +102,10 @@ void CodeGen_PTX_Dev::add_kernel(Stmt stmt,
     builder->CreateBr(body_block);
 
     // Add the nvvm annotation that it is a kernel function.
-    MDNode *mdNode = MDNode::get(*context, vec<Value *>(function,
-                                                        MDString::get(*context, "kernel"),
-                                                        ConstantInt::get(i32, 1)));
+    MDNode *mdNode = MDNode::get(*context, vec<LLVMMDNodeArgumentType>(value_as_metadata_type(function),
+                                                                       MDString::get(*context, "kernel"),
+                                                                       value_as_metadata_type(ConstantInt::get(i32, 1))));
+
     module->getOrInsertNamedMetadata("nvvm.annotations")->addOperand(mdNode);
 
 
@@ -245,6 +246,10 @@ bool CodeGen_PTX_Dev::use_soft_float_abi() const {
     return false;
 }
 
+llvm::Triple CodeGen_PTX_Dev::get_target_triple() const {
+    return Triple(Triple::normalize(march() + "--"));
+}
+
 vector<char> CodeGen_PTX_Dev::compile_to_src() {
 
     #ifdef WITH_PTX
@@ -260,8 +265,8 @@ vector<char> CodeGen_PTX_Dev::compile_to_src() {
     optimize_module();
 
     // Set up TargetTriple
-    module->setTargetTriple(Triple::normalize(march()+"--"));
-    Triple TheTriple(module->getTargetTriple());
+    Triple TheTriple = get_target_triple();
+    module->setTargetTriple(TheTriple.str());
 
     // Allocate target machine
     const std::string MArch = march();
@@ -309,39 +314,46 @@ vector<char> CodeGen_PTX_Dev::compile_to_src() {
     TargetMachine &Target = *target.get();
 
     // Set up passes
+    #if LLVM_VERSION < 37
     PassManager PM;
+    #else
+    legacy::PassManager PM;
+    #endif
 
-    TargetLibraryInfo *TLI = new TargetLibraryInfo(TheTriple);
-    PM.add(TLI);
+    #if LLVM_VERSION < 37
+    PM.add(new TargetLibraryInfo(TheTriple));
+    #else
+    PM.add(new TargetLibraryInfoWrapperPass(TheTriple));
+    #endif
 
     if (target.get()) {
         #if LLVM_VERSION < 33
         PM.add(new TargetTransformInfo(target->getScalarTargetTransformInfo(),
                                        target->getVectorTargetTransformInfo()));
-        #else
+        #elif LLVM_VERSION < 37
         target->addAnalysisPasses(PM);
         #endif
     }
 
-    // Add the target data from the target machine, if it exists, or the module.
+    #if LLVM_VERSION == 36
+    const DataLayout *TD = Target.getSubtargetImpl()->getDataLayout();
+    #else
+    const DataLayout *TD = Target.getDataLayout();
+    #endif
+
     #if LLVM_VERSION < 35
-    if (const DataLayout *TD = Target.getDataLayout()) {
+    if (TD) {
         PM.add(new DataLayout(*TD));
     } else {
         PM.add(new DataLayout(module));
     }
     #else
-    #if LLVM_VERSION == 35
-    const DataLayout *TD = Target.getDataLayout();
     if (TD) {
         module->setDataLayout(TD);
     }
+    #if LLVM_VERSION == 35
     PM.add(new DataLayoutPass(module));
     #else // llvm >= 3.6
-    const DataLayout *TD = Target.getSubtargetImpl()->getDataLayout();
-    if (TD) {
-        module->setDataLayout(TD);
-    }
     PM.add(new DataLayoutPass);
     #endif
     #endif
@@ -371,7 +383,11 @@ vector<char> CodeGen_PTX_Dev::compile_to_src() {
     PM.add(createAlwaysInlinerPass());
 
     // Override default to generate verbose assembly.
+    #if LLVM_VERSION < 37
     Target.setAsmVerbosityDefault(true);
+    #else
+    Target.Options.MCOptions.AsmVerbose = true;
+    #endif
 
     // Output string stream
     std::string outstr;
@@ -406,6 +422,10 @@ vector<char> CodeGen_PTX_Dev::compile_to_src() {
 #endif
 }
 
+int CodeGen_PTX_Dev::native_vector_bits() const {
+    // PTX doesn't really do vectorization. The widest type is a double.
+    return 64;
+}
 
 string CodeGen_PTX_Dev::get_current_kernel_name() {
     return function->getName();
@@ -413,6 +433,10 @@ string CodeGen_PTX_Dev::get_current_kernel_name() {
 
 void CodeGen_PTX_Dev::dump() {
     module->dump();
+}
+
+std::string CodeGen_PTX_Dev::print_gpu_name(const std::string &name) {
+    return name;
 }
 
 }}
