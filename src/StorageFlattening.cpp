@@ -108,11 +108,11 @@ private:
                 if (scope.contains(stride_name_constrained)) {
                     stride_name = stride_name_constrained;
                 }
-                if (scope.contains(min_name_constrained)) {
+                if (scope.contains(min_name_constrained) && i < callArgs.size()) {
                     min_name = min_name_constrained;
                 }
                 strides.push_back(Variable::make(Int(32), stride_name));
-                mins.push_back(Variable::make(Int(32), min_name));
+                if(i < callArgs.size()) mins.push_back(Variable::make(Int(32), min_name));
             }
             
             const vector<string> &funcArgs = iter->second.args();
@@ -215,6 +215,7 @@ private:
 
         const vector<string> &storage_dims = iter->second.schedule().storage_dims();
         const vector<string> &args = iter->second.args();
+                
         for (size_t i = 0; i < storage_dims.size(); i++) {
             /*
              * Three cases for a variable in the storage_dims.
@@ -272,7 +273,7 @@ private:
                 }
             }
             internal_assert(num != 0);
-            Expr splitMin = Expr(0);
+            Expr splitMin(0);
             Expr splitExtent = *num;
             if (den != 0) {
                 splitExtent = simplify((*num) / (*den));
@@ -280,7 +281,6 @@ private:
 
             splitBounds.push_back(Range(splitMin, splitExtent));
         }
-        
         // Compute the size
         //AE: I think I'll have to take splits into account here, because it modifies the bounds
         std::vector<Expr> extents;
@@ -295,6 +295,7 @@ private:
         internal_assert(storage_dims.size() == splitBounds.size());
 
         stmt = body;
+        
         //AE: a separate buffer for each type?
         for (size_t idx = 0; idx < realize->types.size(); idx++) {
             string buffer_name = realize->name;
@@ -332,6 +333,7 @@ private:
             args[1] = realize->types[idx].bytes();
             for (int i = 0; i < dims; i++) {
                 if(i<odims) args[3*i+2] = min_var[i];
+                else args[3*i+2] = Expr(0);
                 args[3*i+3] = extent_var[i];
                 args[3*i+4] = stride_var[i];
             }
