@@ -125,7 +125,7 @@ private:
                     shouldSearchSplits = false;
                     for (size_t j = 0; j < splits.size(); j++) {
                         if (splits[j].old_var == search) {
-                            Expr splitVal = callArgs[i];
+                            Expr splitVal = callArgs[i] - mins[i];
                             if (insideSplit) {
                                 splitVal = splitVal % lastSplit;
                             }
@@ -146,7 +146,7 @@ private:
                 for (size_t k = 0; k < storage_dims.size(); k++) {
                     if (search == storage_dims[k]) {
                         //AE
-                        Expr splitVal = callArgs[i];
+                        Expr splitVal = callArgs[i] - mins[i];
                         if (insideSplit) {
                             splitVal = splitVal % lastSplit;
                         }
@@ -304,16 +304,18 @@ private:
 
             // Make the names for the mins, extents, and strides
             int dims = splitBounds.size();
+            int odims = realize->bounds.size(); //pre split dims
             vector<string> min_name(dims), extent_name(dims), stride_name(dims);
+            //only need odims mins, because those are not affected by split
             for (int i = 0; i < dims; i++) {
                 string d = int_to_string(i);
-                min_name[i] = buffer_name + ".min." + d;
+                if(i<odims) min_name[i] = buffer_name + ".min." + d;
                 stride_name[i] = buffer_name + ".stride." + d;
                 extent_name[i] = buffer_name + ".extent." + d;
             }
             vector<Expr> min_var(dims), extent_var(dims), stride_var(dims);
             for (int i = 0; i < dims; i++) {
-                min_var[i] = Variable::make(Int(32), min_name[i]);
+                if(i<odims) min_var[i] = Variable::make(Int(32), min_name[i]);
                 extent_var[i] = Variable::make(Int(32), extent_name[i]);
                 stride_var[i] = Variable::make(Int(32), stride_name[i]);
             }
@@ -329,7 +331,7 @@ private:
             args[0] = Call::make(Handle(), Call::address_of, vec(first_elem), Call::Intrinsic);
             args[1] = realize->types[idx].bytes();
             for (int i = 0; i < dims; i++) {
-                args[3*i+2] = min_var[i];
+                if(i<odims) args[3*i+2] = min_var[i];
                 args[3*i+3] = extent_var[i];
                 args[3*i+4] = stride_var[i];
             }
@@ -344,8 +346,6 @@ private:
             //  need any reordering stuff now?
             // Compute the strides
             for (int i = (int)splitBounds.size()-1; i > 0; i--) {
-                //int prev_j = storage_dims[i-1];
-                //int j = storage_dims[i];
                 Expr stride = stride_var[i-1] * extent_var[i-1];
                 stmt = LetStmt::make(stride_name[i], stride, stmt);
             }
@@ -355,10 +355,14 @@ private:
                 //int innermost = storage_permutation.empty() ? 0 : storage_permutation[0];
                 stmt = LetStmt::make(stride_name[0], 1, stmt);
             }
+            
 
             // Assign the mins and extents stored
+            for (size_t i = realize->bounds.size(); i > 0; i--) {
+                stmt = LetStmt::make(min_name[i-1], realize->bounds[i-1].min, stmt);
+            }
+            
             for (size_t i = dims; i > 0; i--) {
-                stmt = LetStmt::make(min_name[i-1], splitBounds[i-1].min, stmt);
                 stmt = LetStmt::make(extent_name[i-1], splitBounds[i-1].extent, stmt);
             }
         }
