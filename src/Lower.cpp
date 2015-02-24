@@ -65,10 +65,10 @@ void lower_test() {
     f(x, y) = g(x, y-1) + g(x, y+1);
 
 
-    f.split(x, xo, xi, 4).vectorize(xi).parallel(xo);
-    f.compute_root();
+    //f.split(x, xo, xi, 4).vectorize(xi).parallel(xo);
+    //f.compute_root();
 
-    g.split(y, yo, yi, 2).unroll(yi);;
+    //g.split(y, yo, yi, 2).unroll(yi);;
     g.store_at(f, y).compute_at(f, x);
     h.store_at(f, y).compute_at(f, y);
 
