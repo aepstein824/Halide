@@ -93,7 +93,8 @@ private:
 
         //AE: experimental
         map<string, Function>::const_iterator iter = env.find(name);
-        if(iter != env.end()){
+        // if it's internal, then it doesn't have the splitting through realize
+        if(internal && iter != env.end()){
             vector<StorageSplit> splits = iter->second.schedule().storage_splits();
             splits = rebalanceTree(splits);
             
@@ -201,11 +202,10 @@ private:
 
     void visit(const Realize *realize) {
         realizations.push(realize->name, 1);
-        //AE: realize.bounds just contains variables made to contain bounds info of the arguments
 
         Stmt body = mutate(realize->body);
-        //Stmt body = realize->body;
-        
+
+        // this is going to hold the new bounds determined by splits
         Region splitBounds;
 
         map<string, Function>::const_iterator iter = env.find(realize->name);
@@ -224,15 +224,14 @@ private:
              * 2) Outer. Then it is bound(parent) / factor. Parent can be arg or
              *  a split. Due to rebalance, in a tree, all but 1 will be this
              * 3) Inner. Extent is just factor.
-             * TODO: figure out mins, deal with new names from rebalanced splits, non exact divisions
              */
             int varCase = -1;
             string search;
             Expr const *num = 0;
             Expr const *den = 0;
+            
             //first figure out if it's a case 2, because 2 needs info from inners
             // and possibly the args array
-            
             for (size_t j = 0; j < splits.size(); j++) {
                 if (storage_dims[i] == splits[j].outer) {
                     varCase = 2;
@@ -241,6 +240,7 @@ private:
                     break;
                 }
             }
+            
             // at this point it must be either 1 or 3, so we are still searching
             //  for the variable name itself
             if (search.empty()) {
@@ -258,9 +258,10 @@ private:
                     break;
                 }
             }
-            //if it was 2 and we haven't found it, or we just haven't found it
-            bool searchArgs = (varCase == 2 && num == 0) || (varCase < 0);
-            for (size_t j = 0; searchArgs && j < args.size(); j++) {
+            
+            //if it was 2 and we haven't found the inner, or we just haven't found it
+            bool shouldSearchArgs = (varCase == 2 && num == 0) || (varCase < 0);
+            for (size_t j = 0; shouldSearchArgs && j < args.size(); j++) {
                 if (search == args[j]) {
                     num = &realize->bounds[j].extent;
                     if (varCase < 0) {
@@ -276,13 +277,13 @@ private:
             Expr splitMin(0);
             Expr splitExtent = *num;
             if (den != 0) {
-                splitExtent = simplify((*num) / (*den));
+                // integer division that rounds up
+                splitExtent = simplify((((*num) - 1) / (*den)) + 1);
             }
 
             splitBounds.push_back(Range(splitMin, splitExtent));
         }
         // Compute the size
-        //AE: I think I'll have to take splits into account here, because it modifies the bounds
         std::vector<Expr> extents;
         for (size_t i = 0; i < splitBounds.size(); i++) {
           extents.push_back(splitBounds[i].extent);
@@ -344,8 +345,6 @@ private:
                                  stmt);
             // Make the allocation node
             stmt = Allocate::make(buffer_name, t, extents, condition, stmt);
-            // AE: since the code uses storage_dims directly now, it shouldn't
-            //  need any reordering stuff now?
             // Compute the strides
             for (int i = (int)splitBounds.size()-1; i > 0; i--) {
                 Expr stride = stride_var[i-1] * extent_var[i-1];
