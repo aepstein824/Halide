@@ -173,7 +173,7 @@ void GeneratorRegistry::unregister_factory(const std::string &name) {
     GeneratorRegistry &registry = get_registry();
     std::lock_guard<std::mutex> lock(registry.mutex);
     internal_assert(registry.factories.find(name) != registry.factories.end())
-        << "Generator not found: " << name;
+        << "Generator not found: " << name << "\n";
     registry.factories.erase(name);
 }
 
@@ -183,7 +183,7 @@ std::unique_ptr<GeneratorBase> GeneratorRegistry::create(const std::string &name
     GeneratorRegistry &registry = get_registry();
     std::lock_guard<std::mutex> lock(registry.mutex);
     auto it = registry.factories.find(name);
-    user_assert(it != registry.factories.end()) << "Generator not found: " << name;
+    user_assert(it != registry.factories.end()) << "Generator not found: " << name << "\n";
     return it->second->create(params);
 }
 
