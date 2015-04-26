@@ -69,6 +69,7 @@ public:
     EXPORT Stage &fuse(VarOrRVar inner, VarOrRVar outer, VarOrRVar fused);
     EXPORT Stage &serial(VarOrRVar var);
     EXPORT Stage &parallel(VarOrRVar var);
+    EXPORT Stage &distribute(VarOrRVar var);
     EXPORT Stage &vectorize(VarOrRVar var);
     EXPORT Stage &unroll(VarOrRVar var);
     EXPORT Stage &parallel(VarOrRVar var, Expr task_size);
