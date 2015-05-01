@@ -1247,6 +1247,12 @@ inline Expr random_int(Expr seed = Expr()) {
                                 args, Internal::Call::Intrinsic);
 }
 
+inline Expr mpi_get_rank () {
+    std::vector<Expr> args;
+    return Internal::Call::make(Int(32), Internal::Call::mpi_get_rank,
+                                args, Internal::Call::Intrinsic);
+}
+
 // For the purposes of a call to print, const char * can convert
 // silently to an Expr
 struct PrintArg {

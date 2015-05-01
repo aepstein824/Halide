@@ -4,6 +4,7 @@
 #include "Error.h"
 #include <sstream>
 #include <map>
+#include <math.h>
 
 namespace Halide {
 namespace Internal {

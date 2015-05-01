@@ -12,6 +12,8 @@
 #include "Lerp.h"
 #include "Util.h"
 
+#include "mpi.h"
+
 namespace Halide {
 namespace Internal {
 
@@ -1632,6 +1634,34 @@ void CodeGen::visit(const Call *op) {
             debug(4) << "Creating call to debug_to_file\n";
 
             value = builder->CreateCall(debug_to_file, args);
+        } else if (op->name == Call::mpi_get_rank){
+            internal_assert(op->args.size() == 0);
+            //static bool initSqrt = false;
+            //llvm::Type *doubleTy = llvm::Type::getDoubleTy(getGlobalContext());
+            llvm::Type *int32Ty = llvm::Type::getInt32Ty(getGlobalContext());
+            llvm::Type *int32pTy = llvm::Type::getInt32PtrTy(getGlobalContext());
+            llvm::Type *int64Ty = llvm::Type::getInt64Ty(getGlobalContext());
+            llvm::Type *voidpTy = int64Ty;
+
+            llvm::Type* argListTypes[] = {voidpTy, int32pTy};
+
+            //if (!initSqrt) {
+            llvm::FunctionType *mpiType = FunctionType::get(int32Ty,
+                                                             ArrayRef<llvm::Type *>
+            (argListTypes, 2),
+                                                             false);
+            //module->getOrInsertFunction("sqrt", sqrtType);
+            //initSqrt = true;
+                //}
+            Value *flagStore = create_alloca_at_entry (int32Ty, 1);
+            llvm::Function *mpiFunc = llvm::Function::Create(mpiType, llvm::Function::ExternalLinkage,
+                                                        "MPI_Comm_rank", module);
+            vector<Value *> args;
+            args.push_back(ConstantInt::get(int64Ty, (long int)MPI_COMM_WORLD));
+            args.push_back(flagStore);
+            builder->CreateCall(mpiFunc, args);
+            value = builder->CreateLoad(flagStore);
+            //value = ConstantInt::get(int32Ty, 10000);
         } else if (op->name == Call::bitwise_and) {
             internal_assert(op->args.size() == 2);
             value = builder->CreateAnd(codegen(op->args[0]), codegen(op->args[1]));

@@ -10,7 +10,7 @@
 #     the tests in test/generator/ this times only the halide build time.
 
 SHELL = bash
-CXX ?= g++
+CXX = mpic++
 LLVM_CONFIG ?= llvm-config
 LLVM_COMPONENTS= $(shell $(LLVM_CONFIG) --components)
 LLVM_VERSION = $(shell $(LLVM_CONFIG) --version | cut -b 1-3)
