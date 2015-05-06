@@ -416,6 +416,8 @@ std::string Stage::dump_argument_list() const {
     return oss.str();
 }
 
+
+
 void Stage::split(const string &old, const string &outer, const string &inner, Expr factor, bool exact) {
     vector<Dim> &dims = schedule.dims();
 
@@ -951,6 +953,13 @@ Stage &Stage::gpu_tile(VarOrRVar x, VarOrRVar y, VarOrRVar z,
     parallel(tx);
     parallel(ty);
     parallel(tz);
+    return *this;
+}
+
+Func &Func::distribute(VarOrRVar old, Expr factor) {
+    DistributionMap &dists = func.schedule().distributions();
+    Distribution newDist(old.name(), factor);
+    dists.insert(newDist);
     return *this;
 }
 

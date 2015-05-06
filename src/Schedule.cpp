@@ -12,6 +12,8 @@ struct ScheduleContents {
     mutable RefCount ref_count;
 
     LoopLevel store_level, compute_level;
+    // this list is unordered
+    DistributionMap distributions;
     std::vector<Split> splits;
     std::vector<Dim> dims;
     std::vector<std::string> storage_dims;
@@ -53,6 +55,15 @@ bool &Schedule::touched() {
 bool Schedule::touched() const {
     return contents.ptr->touched;
 }
+
+const DistributionMap &Schedule::distributions() const {
+    return contents.ptr->distributions;
+}
+
+DistributionMap &Schedule::distributions() {
+    return contents.ptr->distributions;
+}
+
 
 const std::vector<Split> &Schedule::splits() const {
     return contents.ptr->splits;

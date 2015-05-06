@@ -977,6 +977,8 @@ public:
     EXPORT FuncRefExpr operator()(std::vector<Expr>) const;
     // @}
 
+    EXPORT Func &distribute(VarOrRVar old, Expr factor);
+
     /** Split a dimension into inner and outer subdimensions with the
      * given names, where the inner dimension iterates from 0 to
      * factor-1. The inner and outer subdimensions can then be dealt

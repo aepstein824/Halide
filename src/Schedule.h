@@ -8,6 +8,7 @@
 #include "IR.h"
 #include <string>
 #include <vector>
+#include <map>
 
 namespace Halide {
 namespace Internal {
@@ -61,6 +62,9 @@ struct LoopLevel {
     }
 
 };
+
+typedef std::map <std::string, Expr> DistributionMap;
+typedef std::pair<std::string, Expr> Distribution;
 
 struct Split {
     std::string old_var, outer, inner;
@@ -131,6 +135,9 @@ public:
     bool touched() const;
     // @}
 
+    const DistributionMap &distributions () const;
+    DistributionMap &distributions ();
+    
     /** The traversal of the domain of a function can have some of its
      * dimensions split into sub-dimensions. See ScheduleHandle::split */
     // @{
