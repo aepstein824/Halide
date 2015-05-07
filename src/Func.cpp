@@ -651,11 +651,6 @@ Stage &Stage::parallel(VarOrRVar var) {
     return *this;
 }
 
-Stage &Stage::distribute(VarOrRVar var) {
-    set_dim_type(var, For::Distributed);
-    return *this;
-}
-
 Stage &Stage::vectorize(VarOrRVar var) {
     set_dim_type(var, For::Vectorized);
     return *this;
