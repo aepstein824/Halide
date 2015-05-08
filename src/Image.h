@@ -89,6 +89,8 @@ public:
     /** Set the min coordinates of a dimension. */
     EXPORT void set_min(int m0, int m1 = 0, int m2 = 0, int m3 = 0);
 
+    EXPORT void set_distrib(int e0, int e1 = 0, int e2 = 0, int e3 = 0);
+
     /** Get the number of elements in the buffer between two adjacent
      * elements in the given dimension. For example, the stride in
      * dimension 0 is usually 1, and the stride in dimension 1 is

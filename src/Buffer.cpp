@@ -220,6 +220,28 @@ void Buffer::set_min(int m0, int m1, int m2, int m3) {
     contents.ptr->buf.min[3] = m3;
 }
 
+void Buffer::set_distrib(int e0, int e1, int e2, int e3) {
+    user_assert(defined()) << "Buffer is undefined\n";
+    buffer_t *buf = &contents.ptr->buf;
+    buf->distrib[0] = e0;
+    buf->distrib[1] = e1;
+    buf->distrib[2] = e2;
+    buf->distrib[3] = e3;
+    int lastNonZero = -1;
+    for (int i = 0; i < 4; i++) {
+        if (buf->distrib[i] < 0) {
+            continue;
+        }
+        if (lastNonZero < 0) {
+            buf->d_stride[i] = 1;
+        } else {
+            buf->d_stride[i] = buf->d_stride[lastNonZero]
+                * buf->distrib[lastNonZero];
+        }
+        lastNonZero = i;
+    }
+}
+
 Type Buffer::type() const {
     user_assert(defined()) << "Buffer is undefined\n";
     return contents.ptr->type;

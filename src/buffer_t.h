@@ -61,6 +61,11 @@ typedef struct buffer_t {
     mirroring this buffer, and the data has been modified on the
     device side. */
     bool dev_dirty;
+
+    int32_t distrib[4];
+    int32_t d_stride[4];
+
+    
 } buffer_t;
 
 #endif

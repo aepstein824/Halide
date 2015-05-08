@@ -148,6 +148,11 @@ void ImageBase::set_min(int m0, int m1, int m2, int m3) {
     prepare_for_direct_pixel_access();
 }
 
+void ImageBase::set_distrib(int e0, int e1, int e2, int e3) {
+    user_assert(defined()) << "set_distrib of undefined Image\n";
+    buffer.set_distrib(e0, e1, e2, e3);
+}
+
 int ImageBase::stride(int dim) const {
     user_assert(defined()) << "stride of undefined Image\n";
     user_assert(dim >= 0 && dim < dims)
