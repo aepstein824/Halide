@@ -92,7 +92,11 @@ public:
      * that corresponds to the base address of the buffer. */
     EXPORT void set_min(int m0, int m1 = 0, int m2 = 0, int m3 = 0);
 
-    EXPORT void set_distrib(int e0, int e1 = 0, int e2 = 0, int e3 = 0);
+    EXPORT bool distributed() const;
+    EXPORT int d_stride(int dim) const;
+    EXPORT int d_extent(int dim) const;
+
+    EXPORT void set_d_extent(int e0, int e1 = 0, int e2 = 0, int e3 = 0);
 
     /** Get the Halide type of the contents of this buffer. */
     EXPORT Type type() const;

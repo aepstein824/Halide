@@ -1424,7 +1424,7 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t,
         // Check that the region passed in (after applying constraints) is within the region used
         debug(3) << "In image " << name << " region touched is:\n";
 
-
+        //AE: here
         for (int j = 0; j < dimensions; j++) {
             string dim = int_to_string(j);
             string actual_min_name = name + ".min." + dim;
@@ -1433,6 +1433,12 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t,
             Expr actual_min = Variable::make(Int(32), actual_min_name, image, param, rdom);
             Expr actual_extent = Variable::make(Int(32), actual_extent_name, image, param, rdom);
             Expr actual_stride = Variable::make(Int(32), actual_stride_name, image, param, rdom);
+
+            if (image.defined() && image.d_extent(j) != 0) {
+                actual_min = IntImm::make(0); //AE: should have a distrib min too
+                actual_extent *= image.d_extent(j);
+            }
+            
             if (!touched[j].min.defined() || !touched[j].max.defined()) {
                 user_error << "Buffer " << name
                            << " may be accessed in an unbounded way in dimension "
@@ -1480,7 +1486,6 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t,
                 ") in dimension " + dim);
 
             asserts_required.push_back(AssertStmt::make(actual_max >= max_required, error_msg_extent));
-
             // Come up with a required stride to use in bounds
             // inference mode. We don't assert it. It's just used to
             // apply the constraints to to come up with a proposed

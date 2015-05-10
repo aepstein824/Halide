@@ -212,6 +212,20 @@ int Buffer::min(int dim) const {
     return contents.ptr->buf.min[dim];
 }
 
+    int Buffer::d_extent(int dim) const {
+        user_assert(defined());
+        user_assert(dim >= 0 && dim < 4) << "We only support 4-dimensional buffers for now";
+        return contents.ptr->buf.d_extent[dim];
+    }
+    int Buffer::d_stride(int dim) const {
+        user_assert(defined());
+        user_assert(dim >= 0 && dim < 4) << "We only support 4-dimensional buffers for now";
+        return contents.ptr->buf.d_stride[dim];
+    }
+    bool Buffer::distributed() const {
+        return contents.ptr->buf.distributed;
+    }
+
 void Buffer::set_min(int m0, int m1, int m2, int m3) {
     user_assert(defined()) << "Buffer is undefined\n";
     contents.ptr->buf.min[0] = m0;
@@ -220,23 +234,24 @@ void Buffer::set_min(int m0, int m1, int m2, int m3) {
     contents.ptr->buf.min[3] = m3;
 }
 
-void Buffer::set_distrib(int e0, int e1, int e2, int e3) {
+void Buffer::set_d_extent(int e0, int e1, int e2, int e3) {
     user_assert(defined()) << "Buffer is undefined\n";
     buffer_t *buf = &contents.ptr->buf;
-    buf->distrib[0] = e0;
-    buf->distrib[1] = e1;
-    buf->distrib[2] = e2;
-    buf->distrib[3] = e3;
+    buf->d_extent[0] = e0;
+    buf->d_extent[1] = e1;
+    buf->d_extent[2] = e2;
+    buf->d_extent[3] = e3;
     int lastNonZero = -1;
     for (int i = 0; i < 4; i++) {
-        if (buf->distrib[i] < 0) {
+        if (buf->d_extent[i] < 0) {
             continue;
         }
+        buf->distributed = true;
         if (lastNonZero < 0) {
             buf->d_stride[i] = 1;
         } else {
             buf->d_stride[i] = buf->d_stride[lastNonZero]
-                * buf->distrib[lastNonZero];
+                * buf->d_extent[lastNonZero];
         }
         lastNonZero = i;
     }

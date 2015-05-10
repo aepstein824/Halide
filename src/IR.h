@@ -583,6 +583,9 @@ struct Evaluate : public StmtNode<Evaluate> {
     EXPORT static Stmt make(Expr v);
 };
 
+struct MPI_Share : public StmtNode<MPI_Share> {
+};
+
 }
 }
 // Now that we've defined an Expr and ForType, we can include the definition of a function

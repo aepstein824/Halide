@@ -62,10 +62,10 @@ typedef struct buffer_t {
     device side. */
     bool dev_dirty;
 
-    int32_t distrib[4];
-    int32_t d_stride[4];
 
-    
+    bool distributed;
+    int32_t d_extent[4];
+    int32_t d_stride[4];
 } buffer_t;
 
 #endif
