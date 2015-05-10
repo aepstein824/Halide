@@ -584,6 +584,10 @@ struct Evaluate : public StmtNode<Evaluate> {
 };
 
 struct MPI_Share : public StmtNode<MPI_Share> {
+    Buffer image;
+    Stmt body;
+
+    EXPORT static Stmt make(Buffer image, Stmt body);
 };
 
 }

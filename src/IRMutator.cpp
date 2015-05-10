@@ -313,5 +313,9 @@ void IRMutator::visit(const Evaluate *op) {
     }
 }
 
+void IRMutator::visit(const MPI_Share *op) {
+    stmt = op->body;
+}
+
 }
 }

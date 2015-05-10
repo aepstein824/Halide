@@ -1180,6 +1180,10 @@ private:
             branches.push_back(branch);
         }
     }
+
+    void visit(const MPI_Share *op) {
+	add_branch(Stmt(op->body));
+    }
 };
 
 

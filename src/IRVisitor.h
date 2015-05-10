@@ -58,6 +58,7 @@ struct Realize;
 struct Block;
 struct IfThenElse;
 struct Evaluate;
+struct MPI_Share;
 
 class Function;
 
@@ -107,6 +108,7 @@ public:
     EXPORT virtual void visit(const Block *);
     EXPORT virtual void visit(const IfThenElse *);
     EXPORT virtual void visit(const Evaluate *);
+    EXPORT virtual void visit(const MPI_Share *);
 };
 
 /** A base class for algorithms that walk recursively over the IR
@@ -170,6 +172,7 @@ public:
     EXPORT virtual void visit(const Block *);
     EXPORT virtual void visit(const IfThenElse *);
     EXPORT virtual void visit(const Evaluate *);
+    EXPORT virtual void visit(const MPI_Share *);
     // @}
 };
 

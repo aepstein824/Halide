@@ -86,7 +86,7 @@ private:
     void visit(const Block *);
     void visit(const IfThenElse *);
     void visit(const Evaluate *);
-
+    void visit(const MPI_Share *);
 };
 
 template<typename T>
@@ -426,6 +426,13 @@ void IRComparer::visit(const Evaluate *op) {
     const Evaluate *s = stmt.as<Evaluate>();
 
     compare_expr(s->value, op->value);
+}
+
+void IRComparer::visit(const MPI_Share *op) {
+    const MPI_Share *s = stmt.as<MPI_Share>();
+
+    compare_expr(StringImm::make(s->image.name()),
+		 StringImm::make(op->image.name()));
 }
 
 } // namespace

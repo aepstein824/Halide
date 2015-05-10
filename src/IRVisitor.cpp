@@ -148,6 +148,10 @@ void IRVisitor::visit(const LetStmt *op) {
     op->body.accept(this);
 }
 
+void IRVisitor::visit(const MPI_Share *op) {
+    op->body.accept(this);
+}
+
 void IRVisitor::visit(const AssertStmt *op) {
     op->condition.accept(this);
 }
@@ -434,5 +438,8 @@ void IRGraphVisitor::visit(const Evaluate *op) {
     include(op->value);
 }
 
+void IRGraphVisitor::visit(const MPI_Share *op) {
+}
+    
 }
 }

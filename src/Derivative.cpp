@@ -372,6 +372,10 @@ class Monotonic : public IRVisitor {
     void visit(const Evaluate *op) {
         internal_error << "Monotonic of statement\n";
     }
+
+    void visit(const MPI_Share *op) {
+	internal_error << "Monotonic of statement\n";
+    }
 public:
     MonotonicResult result;
 

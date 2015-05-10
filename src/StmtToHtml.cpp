@@ -549,6 +549,12 @@ public:
         stream << close_div();
     }
 
+    void visit(const MPI_Share *op) {
+	stream << open_div("MPI_Share");
+	print(StringImm::make(op->image.name()));
+	stream << close_div();
+    }
+
     StmtToHtml(string filename) : id_count(0), context_stack(1, 0) {
         stream.open(filename.c_str());
         stream << "<head>";

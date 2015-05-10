@@ -1668,6 +1668,11 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t,
             // Check the var passed in equals the constrained version (when not in inference mode)
             asserts_constrained.push_back(AssertStmt::make(var == constrained_var, error.str()));
         }
+
+	// AE: put in the mpi node
+	if (image.defined() && image.distributed()) {
+	    s = MPI_Share::make(image, s);
+	}
     }
 
     // Inject the code that checks that no dimension math overflows
