@@ -12,7 +12,7 @@ struct ScheduleContents {
     mutable RefCount ref_count;
 
     LoopLevel store_level, compute_level;
-    // this list is unordered
+
     DistributionMap distributions;
     std::vector<Split> splits;
     std::vector<Dim> dims;

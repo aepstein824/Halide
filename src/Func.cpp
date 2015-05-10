@@ -951,9 +951,10 @@ Stage &Stage::gpu_tile(VarOrRVar x, VarOrRVar y, VarOrRVar z,
     return *this;
 }
 
-Func &Func::distribute(VarOrRVar old, Expr factor) {
+Func &Func::distribute(VarOrRVar old, Expr inner, Expr outer) {
     DistributionMap &dists = func.schedule().distributions();
-    Distribution newDist(old.name(), factor);
+    DistributionFactor newDistFactor  = {inner, outer};
+    Distribution newDist(old.name(), newDistFactor);
     dists.insert(newDist);
     return *this;
 }

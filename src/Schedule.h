@@ -63,8 +63,12 @@ struct LoopLevel {
 
 };
 
-typedef std::map <std::string, Expr> DistributionMap;
-typedef std::pair<std::string, Expr> Distribution;
+struct DistributionFactor {
+    Expr inner, outer;
+};
+
+typedef std::pair<std::string, DistributionFactor> Distribution;
+typedef std::map <std::string, DistributionFactor> DistributionMap;
 
 struct Split {
     std::string old_var, outer, inner;
