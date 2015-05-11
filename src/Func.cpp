@@ -25,6 +25,8 @@
 #include "HumanReadableStmt.h"
 #include "StmtToHtml.h"
 
+#include "MPI_Sharing.h"
+
 namespace Halide {
 
 using std::max;

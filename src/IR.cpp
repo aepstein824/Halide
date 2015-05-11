@@ -477,7 +477,7 @@ Stmt MPI_Share::make(Buffer image, Stmt body) {
     MPI_Share *node = new MPI_Share;
     node->image = image;
     node->body = body;
-    return body;
+    return node;
 }
     
     

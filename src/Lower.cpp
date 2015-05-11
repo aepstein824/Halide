@@ -44,6 +44,8 @@
 #include "Memoization.h"
 #include "VaryingAttributes.h"
 
+#include "MPI_Sharing.h"
+
 namespace Halide {
 namespace Internal {
 
@@ -1686,13 +1688,13 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t,
             s = LetStmt::make(lets_overflow[i-1].first, lets_overflow[i-1].second, s);
         }
     }
-
     // Replace uses of the var with the constrained versions in the
     // rest of the program. We also need to respect the existence of
     // constrained versions during storage flattening and bounds
     // inference.
+    	    mpi_sharing(s);
     s = substitute(replace_with_constrained, s);
-
+	    mpi_sharing(s);
     // Now we add a bunch of code to the top of the pipeline. This is
     // all in reverse order compared to execution, as we incrementally
     // prepending code.
@@ -1796,6 +1798,7 @@ Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes
     s = bounds_inference(s, order, env, func_bounds);
     debug(2) << "Lowering after computation bounds inference:\n" << s << '\n';
 
+
     debug(1) << "Performing sliding window optimization...\n";
     s = sliding_window(s, env);
     debug(2) << "Lowering after sliding window:\n" << s << '\n';
@@ -1826,6 +1829,7 @@ Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes
     debug(1) << "Simplifying...\n"; // without removing dead lets, because storage flattening needs the strides
     s = simplify(s, false);
     debug(2) << "Lowering after first simplification:\n" << s << "\n\n";
+
 
     debug(1) << "Dynamically skipping stages...\n";
     s = skip_stages(s, order);
@@ -1886,6 +1890,7 @@ Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes
     s = remove_trivial_for_loops(s);
     debug(2) << "Lowering after specializing branched loops:\n" << s << "\n\n";
 
+
     debug(1) << "Injecting early frees...\n";
     s = inject_early_frees(s);
     debug(2) << "Lowering after injecting early frees:\n" << s << "\n\n";
@@ -1920,7 +1925,7 @@ Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes
         }
     }
 
-    return s;
+        return s;
 }
 
 }

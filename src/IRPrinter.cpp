@@ -555,8 +555,8 @@ void IRPrinter::visit(const Evaluate *op) {
 
 void IRPrinter::visit(const MPI_Share *op) {
     do_indent();
-    print(StringImm::make("MPI_Share"));
-    stream << "\n";
+    stream << "mpi_share\n";
+    print(op->body);
 }
 
 }}

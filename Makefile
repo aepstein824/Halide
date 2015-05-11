@@ -264,6 +264,7 @@ SOURCE_FILES = \
   Lerp.cpp \
   LinearSolve.cpp \
   Lower.cpp \
+  MPI_Sharing.cpp \
   Memoization.cpp \
   ModulusRemainder.cpp \
   ObjectInstanceRegistry.cpp \
@@ -363,6 +364,7 @@ HEADER_FILES = \
   MainPage.h \
   Memoization.h \
   ModulusRemainder.h \
+  MPI_Sharing.h \
   ObjectInstanceRegistry.h \
   OneToOne.h \
   ParallelRVar.h \
