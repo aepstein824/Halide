@@ -550,10 +550,12 @@ public:
     }
 
     void visit(const MPI_Share *op) {
-	std::cout << "I NEED SOME NEW STRINGS\n";
 	stream << open_div("MPI_Share");
-	stream << "ThE GAME\n";
+	stream << "MPI_Share: ";
 	print(StringImm::make(op->image.name()));
+	stream << open_div("MPI_Share body Indent");
+        print(op->body);
+        stream << close_div();
 	stream << close_div();
     }
 

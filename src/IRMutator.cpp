@@ -314,7 +314,12 @@ void IRMutator::visit(const Evaluate *op) {
 }
 
 void IRMutator::visit(const MPI_Share *op) {
-    stmt = op->body;
+    Stmt body = mutate(op->body);
+    if (body.same_as(op->body)) {
+	stmt = op;
+    } else {
+	stmt = MPI_Share::make(op->image, body);
+    }
 }
 
 }

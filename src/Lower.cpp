@@ -1692,9 +1692,8 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t,
     // rest of the program. We also need to respect the existence of
     // constrained versions during storage flattening and bounds
     // inference.
-    	    mpi_sharing(s);
     s = substitute(replace_with_constrained, s);
-	    mpi_sharing(s);
+
     // Now we add a bunch of code to the top of the pipeline. This is
     // all in reverse order compared to execution, as we incrementally
     // prepending code.
@@ -1790,6 +1789,10 @@ Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes
     debug(1) << "Adding checks for images\n";
     s = add_image_checks(s, f, t, order, env, func_bounds);
     debug(2) << "Lowering after injecting image checks:\n" << s << '\n';
+
+    debug(1) << "Mpi_share nodes\n";
+    s = mpi_sharing(s);
+    debug(2) << "Lowering after mpi_share node:\n" << s << "\n";
 
     // This pass injects nested definitions of variable names, so we
     // can't simplify statements from here until we fix them up. (We
