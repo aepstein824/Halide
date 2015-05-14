@@ -1673,7 +1673,7 @@ Stmt add_image_checks(Stmt s, Function f, const Target &t,
 
 	// AE: put in the mpi node
 	if (image.defined() && image.distributed()) {
-	    s = MPI_Share::make(image, s);
+	    s = MPI_Share::make(image, touched, s);
 	}
     }
 
@@ -1825,6 +1825,8 @@ Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes
     s = storage_folding(s);
     debug(2) << "Lowering after storage folding:\n" << s << '\n';
 
+    
+
     debug(1) << "Injecting debug_to_file calls...\n";
     s = debug_to_file(s, order.back(), env);
     debug(2) << "Lowering after injecting debug_to_file calls:\n" << s << '\n';
@@ -1832,7 +1834,6 @@ Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes
     debug(1) << "Simplifying...\n"; // without removing dead lets, because storage flattening needs the strides
     s = simplify(s, false);
     debug(2) << "Lowering after first simplification:\n" << s << "\n\n";
-
 
     debug(1) << "Dynamically skipping stages...\n";
     s = skip_stages(s, order);
@@ -1847,6 +1848,8 @@ Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes
     debug(1) << "Performing storage flattening...\n";
     s = storage_flattening(s, order.back(), env);
     debug(2) << "Lowering after storage flattening:\n" << s << "\n\n";
+
+
 
     if (t.has_gpu_feature() || t.has_feature(Target::OpenGL)) {
         debug(1) << "Injecting host <-> dev buffer copies...\n";
@@ -1892,7 +1895,6 @@ Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes
     s = simplify(s);
     s = remove_trivial_for_loops(s);
     debug(2) << "Lowering after specializing branched loops:\n" << s << "\n\n";
-
 
     debug(1) << "Injecting early frees...\n";
     s = inject_early_frees(s);

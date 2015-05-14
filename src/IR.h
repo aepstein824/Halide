@@ -583,11 +583,43 @@ struct Evaluate : public StmtNode<Evaluate> {
     EXPORT static Stmt make(Expr v);
 };
 
+struct Interval {
+    Expr min, max;
+    Interval() {}
+    Interval(Expr min, Expr max) : min(min), max(max) {}
+};
+
+//AE: not sure if moving these is necessary, but I gotta get moving 
+/** Represents the bounds of a region of arbitrary dimension. Zero
+ * dimensions corresponds to a scalar region. */
+struct Box {
+    /** The conditions under which this region may be touched. */
+    Expr used;
+
+    /** The bounds if it is touched. */
+    std::vector<Interval> bounds;
+
+    Box() {}
+    Box(size_t sz) : bounds(sz) {}
+    Box(const std::vector<Interval> &b) : bounds(b) {}
+
+    size_t size() const {return bounds.size();}
+    bool empty() const {return bounds.empty();}
+    Interval &operator[](int i) {return bounds[i];}
+    const Interval &operator[](int i) const {return bounds[i];}
+    void resize(size_t sz) {bounds.resize(sz);}
+    void push_back(const Interval &i) {bounds.push_back(i);}
+
+    /** Check if the used condition is defined and not trivially true. */
+    bool maybe_unused() const; 
+};
+
 struct MPI_Share : public StmtNode<MPI_Share> {
     Buffer image;
     Stmt body;
+    Box touched;
 
-    EXPORT static Stmt make(Buffer image, Stmt body);
+    EXPORT static Stmt make(Buffer image, Box touched, Stmt body);
 };
 
 }

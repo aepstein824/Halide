@@ -318,7 +318,7 @@ void IRMutator::visit(const MPI_Share *op) {
     if (body.same_as(op->body)) {
 	stmt = op;
     } else {
-	stmt = MPI_Share::make(op->image, body);
+	stmt = MPI_Share::make(op->image, op->touched, body);
     }
 }
 

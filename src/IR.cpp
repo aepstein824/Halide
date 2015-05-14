@@ -1,5 +1,6 @@
 #include "IR.h"
 #include "IRPrinter.h"
+#include "IROperator.h"
 
 namespace Halide {
 namespace Internal {
@@ -471,11 +472,15 @@ Stmt Evaluate::make(Expr v) {
     return node;
 }
 
-Stmt MPI_Share::make(Buffer image, Stmt body) {
+
+bool Box::maybe_unused() const {return used.defined() && !is_one(used);}
+
+Stmt MPI_Share::make(Buffer image, Box touched, Stmt body) {
     internal_assert(image.defined()) << "MPI image must be defined\n";
     
     MPI_Share *node = new MPI_Share;
     node->image = image;
+    node->touched = touched;
     node->body = body;
     return node;
 }
@@ -486,7 +491,7 @@ Expr Call::make(Type type, std::string name, const std::vector<Expr> &args, Call
                 Function func, int value_index,
                 Buffer image, Parameter param) {
     for (size_t i = 0; i < args.size(); i++) {
-        internal_assert(args[i].defined()) << "Call of undefined\n";
+        internal_assert(args[i].defined()) << "Call with undefined arg" << i << "\n";
     }
     if (call_type == Halide) {
         internal_assert(value_index >= 0 &&
