@@ -642,7 +642,9 @@ namespace Internal {
 struct Call : public ExprNode<Call> {
     std::string name;
     std::vector<Expr> args;
-    typedef enum {Image, Extern, Halide, Intrinsic} CallType;
+    // Aaron: I'm adding ephemeral to reflect a buffer that 
+    // exists only inside the pipeline, but isn't a function call
+    typedef enum {Image, Extern, Halide, Intrinsic, Ephemeral} CallType;
     CallType call_type;
 
     // Halide uses calls internally to represent certain operations
@@ -725,6 +727,11 @@ struct Call : public ExprNode<Call> {
     /** Convenience constructor for loads from images parameters */
     static Expr make(Parameter param, const std::vector<Expr> &args) {
         return make(param.type(), param.name(), args, Image, Function(), 0, Buffer(), param);
+    }
+
+    /** Convenience constructor for ephemeral */
+    static Expr make(Type type, std::string name, const std::vector<Expr> &args) {
+	return make(type, name, args, Ephemeral, Function(), 0, Buffer(), Parameter());
     }
 
 };

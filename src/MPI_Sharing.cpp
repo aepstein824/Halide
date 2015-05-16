@@ -20,9 +20,7 @@ namespace Halide {
 
 	    void visit(const Call *c) {
 		if (c->call_type == Call::Image) {
-		    std::cout << "Replacing image call: " << c->name << " -> "
-			      << replacement_image.name() << "\n";
-		    expr = Call::make(replacement_image, c->args);
+		    expr = Call::make(replacement_image.type(), replacement_image.name(), c->args);
 		} else {
 		    IRMutator::visit(c);
 		}
