@@ -12,6 +12,25 @@ namespace Internal {
     using std::string;
     using std::vector;
 
+   // Visitor and helper function to test if a piece of IR uses an extern image.
+    class ReplaceExternImage : public IRMutator {
+        using IRMutator::visit;
+        
+        Buffer replacement_image;
+
+        void visit(const Call *c) {
+            if (c->call_type == Call::Image) {
+                std::cout << "Replacing image call: " << c->name << " -> "
+                          << replacement_image.name() << "\n";
+                expr = Call::make(replacement_image, c->args);
+            } else {
+                IRMutator::visit(c);
+            }
+        }
+    public:
+        ReplaceExternImage(Buffer replacement_image) : replacement_image(replacement_image) {}
+    };
+
     class MPI_Sharing : public IRMutator {
     public:
 	using IRMutator::visit;
@@ -21,8 +40,9 @@ namespace Internal {
 
 	    string collected_name = buf_name + "_collected";
 
-            Expr null_handle = Call::make(Handle(), Call::null_handle, vector<Expr>(), Call::Intrinsic);
-	    
+            Expr null_handle = Call::make(Handle(), Call::null_handle,
+                                          vector<Expr>(), Call::Intrinsic);
+            
 	    // referencing the code in BoundsInference
 	    vector<Expr> collected_args;
 	    vector<Expr> extents;
@@ -39,10 +59,15 @@ namespace Internal {
 		accum_stride *= text;
 		extents.push_back(text);
 	    }
-	    Expr collected_buffer_t = Call::make(Handle(), Call::create_buffer_t, collected_args,
-					      Call::Intrinsic);
-	    stmt = LetStmt::make(collected_name + ".buffer", collected_buffer_t, op->body);
-	    stmt = Allocate::make(collected_name, buf.type(), extents, const_true(), stmt);
+	    Expr collected_buffer_t = Call::make(Handle(), Call::create_buffer_t,
+                                                 collected_args, Call::Intrinsic);
+	    //stmt = LetStmt::make(collected_name + ".buffer", collected_buffer_t, op->body);
+	    stmt = Allocate::make(collected_name, buf.type(), extents, const_true(), op->body);
+            stmt = op->body;
+
+            Buffer replacement_image(buf.type(), buf.raw_buffer(), collected_name);
+            ReplaceExternImage replacer(replacement_image);
+            stmt = replacer.mutate(stmt);
 	}
     };
 
