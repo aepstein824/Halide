@@ -1790,10 +1790,6 @@ Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes
     s = add_image_checks(s, f, t, order, env, func_bounds);
     debug(2) << "Lowering after injecting image checks:\n" << s << '\n';
 
-    debug(1) << "Mpi_share nodes\n";
-    s = mpi_sharing(s);
-    debug(2) << "Lowering after mpi_share node:\n" << s << "\n";
-
     // This pass injects nested definitions of variable names, so we
     // can't simplify statements from here until we fix them up. (We
     // can still simplify Exprs).
@@ -1809,6 +1805,13 @@ Stmt lower(Function f, const Target &t, const vector<IRMutator *> &custom_passes
     debug(1) << "Performing allocation bounds inference...\n";
     s = allocation_bounds_inference(s, env, func_bounds);
     debug(2) << "Lowering after allocation bounds inference:\n" << s << '\n';
+
+    // allocation_bounds_inference thinks it needs to fill in the bounds
+    // information for realize nodes, but our nodes already have them
+    debug(1) << "Mpi_share nodes\n";
+    s = mpi_sharing(s);
+    debug(2) << "Lowering after mpi_share node:\n" << s << "\n";
+
 
     debug(1) << "Removing code that depends on undef values...\n";
     s = remove_undef(s);
