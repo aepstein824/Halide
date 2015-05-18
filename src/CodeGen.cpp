@@ -1,3 +1,4 @@
+#include <mpi.h>
 #include <iostream>
 #include <sstream>
 
@@ -1632,7 +1633,18 @@ void CodeGen::visit(const Call *op) {
             debug(4) << "Creating call to debug_to_file\n";
 
             value = builder->CreateCall(debug_to_file, args);
-        } else if (op->name == Call::bitwise_and) {
+        } else if (op->name == Call::mpi_collect) {
+
+	    internal_assert(op->args.size() == 0);
+
+	    vector <Value *> args;
+	    
+	    llvm::Function *mpiFunc = module->getFunction("sqrt");
+	    internal_assert(mpiFunc) << "Could not find ashprint\n";
+	    value = builder->CreateCall(mpiFunc, args);
+	    //value = builder->CreateLoad(flagStore);
+	    
+	} else if (op->name == Call::bitwise_and) {
             internal_assert(op->args.size() == 2);
             value = builder->CreateAnd(codegen(op->args[0]), codegen(op->args[1]));
         } else if (op->name == Call::bitwise_xor) {

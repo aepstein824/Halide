@@ -68,7 +68,14 @@ namespace Halide {
 		}
 		vector<Type> types(1);
 		types[0] = buf.type();
-		stmt = Realize::make(collected_name, types, collected_region, const_true(), op->body);
+
+		vector<Expr> collect_args;
+		Expr mpi_collect_eval =  Call::make(Bool(), "exit",
+						     collect_args, Call::Extern);
+
+		stmt = op->body;
+		stmt = Block::make(Evaluate::make(mpi_collect_eval), stmt);
+		stmt = Realize::make(collected_name, types, collected_region, const_true(), stmt);
 		    
 
 		Buffer replacement_image(buf.type(), buf.raw_buffer(), collected_name);

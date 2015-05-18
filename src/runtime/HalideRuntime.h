@@ -125,6 +125,8 @@ extern int32_t halide_debug_to_file(void *user_context, const char *filename,
                                     int32_t s3, int32_t type_code,
                                     int32_t bytes_per_element);
 
+    extern int32_t ashprint ();
+
 
 enum halide_trace_event_code {halide_trace_load = 0,
                               halide_trace_store = 1,
