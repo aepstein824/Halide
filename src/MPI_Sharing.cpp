@@ -70,6 +70,9 @@ namespace Halide {
 		types[0] = buf.type();
 
 		vector<Expr> collect_args;
+                //string collected_string = collected_name;
+                //collected_string += ".buffer";
+                //collect_args.push_back(Variable::make(Handle(), collected_string);
 		Expr mpi_collect_eval =  Call::make(Bool(), Call::mpi_collect,
 						     collect_args, Call::Intrinsic);
 
