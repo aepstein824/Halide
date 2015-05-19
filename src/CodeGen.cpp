@@ -1639,7 +1639,7 @@ void CodeGen::visit(const Call *op) {
 
 	    vector <Value *> args;
 	    
-	    llvm::Function *mpiFunc = module->getFunction("sqrt");
+	    llvm::Function *mpiFunc = module->getFunction("halide_aaron_print");
 	    internal_assert(mpiFunc) << "Could not find ashprint\n";
 	    value = builder->CreateCall(mpiFunc, args);
 	    //value = builder->CreateLoad(flagStore);

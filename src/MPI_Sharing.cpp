@@ -70,8 +70,8 @@ namespace Halide {
 		types[0] = buf.type();
 
 		vector<Expr> collect_args;
-		Expr mpi_collect_eval =  Call::make(Bool(), "exit",
-						     collect_args, Call::Extern);
+		Expr mpi_collect_eval =  Call::make(Bool(), Call::mpi_collect,
+						     collect_args, Call::Intrinsic);
 
 		stmt = op->body;
 		stmt = Block::make(Evaluate::make(mpi_collect_eval), stmt);

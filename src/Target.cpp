@@ -469,6 +469,8 @@ DECLARE_CPP_INITMOD(to_string)
 DECLARE_CPP_INITMOD(module_jit_ref_count)
 DECLARE_CPP_INITMOD(module_aot_ref_count)
 
+DECLARE_CPP_INITMOD(mpi_collect)
+
 #ifdef WITH_ARM
 DECLARE_LL_INITMOD(arm)
 #else
@@ -588,7 +590,7 @@ void link_modules(std::vector<llvm::Module *> &modules) {
                 can_strip = false;
             }
         }
-
+        
         bool is_halide_extern_c_sym = Internal::starts_with(f->getName(), "halide_");
         internal_assert(!is_halide_extern_c_sym || f->isWeakForLinker() || f->isDeclaration()) <<
             " for function " << (std::string)f->getName() << "\n";
@@ -789,6 +791,8 @@ llvm::Module *get_initial_module_for_target(Target t, llvm::LLVMContext *c, bool
             modules.push_back(get_initmod_posix_print(c, bits_64, debug));
             modules.push_back(get_initmod_cache(c, bits_64, debug));
             modules.push_back(get_initmod_to_string(c, bits_64, debug));
+
+            modules.push_back(get_initmod_mpi_collect(c, bits_64, debug));
         }
 
         if (module_type != ModuleJITShared) {
