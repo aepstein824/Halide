@@ -1,7 +1,7 @@
 #include "runtime_internal.h"
 #include "HalideRuntime.h"
 
-extern "C" void ashprint(int *);
+extern void ashprint(int *);
 
 WEAK int32_t halide_aaron_print() {
     int mutated = 0;
